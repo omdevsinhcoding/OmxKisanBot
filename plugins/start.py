@@ -90,14 +90,16 @@ async def id_handler(client: Client, message: Message):
     text = f"👤 **User ID:** `{user_id}`\n💬 **Chat ID:** `{chat_id}`"
     thread_id = getattr(message, "message_thread_id", None)
     
-    # Fallback for older Pyrogram versions where topics are just replies
-    if not thread_id and getattr(message, "is_topic_message", False):
+    # Aggressive fallback: in a forum, every top-level message is technically a reply to the topic creation message
+    if not thread_id:
         thread_id = getattr(message, "reply_to_message_id", None)
 
     if thread_id:
         text += f"\n📂 **Topic ID:** `{thread_id}`"
         text += f"\n📋 **Copy for Upload:** `{chat_id}/{thread_id}`"
-        
+    else:
+        text += f"\n⚠️ **Topic ID Debug:** `Not detected (reply_to={getattr(message, 'reply_to_message_id', 'None')})`"
+
     await message.reply_text(text)
 
 @Client.on_message(filters.command("commands") & filters.private)
