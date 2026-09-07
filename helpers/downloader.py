@@ -62,6 +62,14 @@ async def get_user_client(user_id: int, api_id: int, api_hash: str):
             in_memory=True
         )
         await user_client.start()
+        
+        # Proactively populate the in-memory peer cache to prevent PEER_ID_INVALID
+        try:
+            async for _ in user_client.get_dialogs(limit=100):
+                pass
+        except Exception as e:
+            print(f"Error populating dialogs for {user_id}: {e}")
+            
         return user_client
     except Exception as e:
         print(f"Error starting user client for {user_id}: {e}")
