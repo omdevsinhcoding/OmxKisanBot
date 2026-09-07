@@ -41,6 +41,70 @@ def _build_start_plain(first_name: str) -> str:
     )
 
 
+def _build_help_html() -> str:
+    """Build /help HTML text with <blockquote> tags."""
+    return (
+        "🛠 <b>𝐇𝐨𝐰 𝐓𝐨 𝐔𝐬𝐞 𝐌𝐞</b>\n\n"
+        "👤 <b>𝐔𝐬𝐞𝐫 𝐂𝐨𝐦𝐦𝐚𝐧𝐝𝐬</b>\n\n"
+        "<blockquote>/start - Start the bot\n"
+        "/help - How to use guide\n"
+        "/id - View user ID, chat ID\n"
+        "/commands - View all commands\n"
+        "/login - Login your Telegram account\n"
+        "/logout - Logout current session\n"
+        "/cancel - Cancel ongoing process\n"
+        "/settings - Bot settings (Caption, Rename, Upload, Thumbnail)\n"
+        "/referral - Referral program\n"
+        "/myplan - Check your plan\n"
+        "/premium - Buy premium</blockquote>\n\n"
+        "📌 <b>𝐇𝐨𝐰 𝐓𝐨 𝐒𝐚𝐯𝐞 𝐂𝐨𝐧𝐭𝐞𝐧𝐭</b>\n\n"
+        "<blockquote><b>Single Post:</b> Send any Telegram post link\n"
+        "<b>Batch/Bulk:</b> Send link with range like\n"
+        "<code>https://t.me/channel/1-100</code>\n"
+        "<b>Upload Chat:</b> Set via /settings → Set Upload\n"
+        "<b>Custom Caption:</b> /settings → Set Caption\n"
+        "<b>Rename Rules:</b> /settings → Set Rename (delete/replace words)</blockquote>\n\n"
+        "🤖 <b>𝐁𝐨𝐭 𝐂𝐨𝐧𝐭𝐞𝐧𝐭 𝐄𝐱𝐭𝐫𝐚𝐜𝐭𝐢𝐨𝐧</b> (💎 Premium)\n\n"
+        "<blockquote>Extract restricted content from other bots!\n"
+        "Just send the bot's deep link like:\n"
+        "<code>https://t.me/SomeBot?start=PARAM</code>\n\n"
+        "Bot will extract all messages &amp; media the target bot sends.\n"
+        "<b>Limit:</b> 5000 msgs/link | 2 min cooldown</blockquote>"
+    )
+
+
+def _build_help_plain() -> str:
+    """Fallback plain text (no blockquotes) for /help."""
+    return (
+        "🛠 **How To Use Me**\n\n"
+        "👤 **User Commands**\n\n"
+        "/start - Start the bot\n"
+        "/help - How to use guide\n"
+        "/id - View user ID, chat ID\n"
+        "/commands - View all commands\n"
+        "/login - Login your Telegram account\n"
+        "/logout - Logout current session\n"
+        "/cancel - Cancel ongoing process\n"
+        "/settings - Bot settings (Caption, Rename, Upload, Thumbnail)\n"
+        "/referral - Referral program\n"
+        "/myplan - Check your plan\n"
+        "/premium - Buy premium\n\n"
+        "📌 **How To Save Content**\n\n"
+        "**Single Post:** Send any Telegram post link\n"
+        "**Batch/Bulk:** Send link with range like\n"
+        "`https://t.me/channel/1-100`\n"
+        "**Upload Chat:** Set via /settings → Set Upload\n"
+        "**Custom Caption:** /settings → Set Caption\n"
+        "**Rename Rules:** /settings → Set Rename (delete/replace words)\n\n"
+        "🤖 **Bot Content Extraction** (💎 Premium)\n\n"
+        "Extract restricted content from other bots!\n"
+        "Just send the bot's deep link like:\n"
+        "`https://t.me/SomeBot?start=PARAM`\n\n"
+        "Bot will extract all messages & media the target bot sends.\n"
+        "**Limit:** 5000 msgs/link | 2 min cooldown"
+    )
+
+
 def _start_markup_dict() -> dict:
     """Inline keyboard dict for Bot API."""
     return {
@@ -136,27 +200,25 @@ async def stop_handler(client: Client, message: Message):
 @Client.on_message(filters.command("help") & filters.private)
 async def help_handler(client: Client, message: Message):
     await auto_clean_chat(client, message)
-    text = (
-        "📖 **How To Use - Complete Guide**\n\n"
-        "🔑 **1. Account Login:**\n"
-        "• Use `/login` to connect your Telegram account via OTP for private restricted channels.\n"
-        "• Use `/check` to verify your active session.\n"
-        "• Use `/logout` to remove saved session.\n\n"
-        "🔗 **2. Save Restricted Posts:**\n"
-        "• **Single Link:** Send any Telegram post link directly.\n"
-        "• **Range Link:** Send range link directly (e.g. `https://t.me/c/123/10-20`).\n\n"
-        "📦 **3. Batch Saver:**\n"
-        "• Send: `/batch <start_link> <end_link>`\n"
-        "• Stop batch anytime with `/cancel` or `/stop`.\n\n"
-        "📤 **4. Custom Upload Chat:**\n"
-        "• Set target Channel/Group in `/settings` ➜ **Set Upload** to auto-forward extracted content.\n\n"
-        "📥 **5. Social Media Downloader:**\n"
-        "• `/dl <link>` - Download YouTube / Instagram / TikTok videos\n"
-        "• `/adl <link>` - Download Audio MP3\n\n"
-        "⚙️ **6. Settings:**\n"
-        "• `/settings` - Custom Thumbnail, Caption template, and Word replacements."
-    )
-    await message.reply_text(text)
+    
+    # Try Telegram Bot API directly for blockquotes (non-blocking via thread)
+    try:
+        result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
+            "chat_id": message.chat.id,
+            "text": _build_help_html(),
+            "parse_mode": "HTML",
+            "reply_to_message_id": message.id,
+        })
+        if result.get("ok"):
+            sent_id = result["result"]["message_id"]
+            protect_message(message.chat.id, sent_id)
+            return
+    except Exception as e:
+        print(f"Bot API blockquote help send failed: {e}")
+
+    # Fallback
+    reply_msg = await message.reply_text(_build_help_plain())
+    protect_message(message.chat.id, reply_msg.id)
 
 @Client.on_message(filters.command("id"))
 async def id_handler(client: Client, message: Message):
@@ -251,25 +313,29 @@ async def start_callbacks(client: Client, query: CallbackQuery):
     data = query.data
     try:
         if data == "open_help":
-            help_text = (
-                "📖 **How To Use - Quick Guide**\n\n"
-                "🔑 **1. Login Account:**\n"
-                "• Use `/login` to connect your Telegram account via OTP for private channels.\n\n"
-                "🔗 **2. Save Single Post:**\n"
-                "• Send any Telegram post link directly (e.g. `https://t.me/c/12345/10`).\n\n"
-                "📦 **3. Batch & Range Saver:**\n"
-                "• Send range link directly (e.g. `https://t.me/c/12345/10-20`) or use `/batch`.\n"
-                "• Use `/cancel` or `/stop` to stop anytime.\n\n"
-                "📤 **4. Custom Upload Chat:**\n"
-                "• Go to `/settings` ➜ **Set Upload** to auto-forward all content to your Channel/Group!\n\n"
-                "📥 **5. Social Media Downloader:**\n"
-                "• `/dl <link>` for YouTube, Instagram, TikTok videos.\n"
-                "• `/adl <link>` for Audio MP3.\n\n"
-                "⚙️ **6. Custom Captions & Thumbnails:**\n"
-                "• Manage via `/settings` panel."
-            )
-            buttons = InlineKeyboardMarkup([[InlineKeyboardButton("🔙 Back", callback_data="back_to_start")]])
-            await query.message.edit_text(help_text, reply_markup=buttons)
+            markup_dict = {
+                "inline_keyboard": [
+                    [{"text": "❌ Close", "callback_data": "close_data"}, {"text": "🔙 Back", "callback_data": "back_to_start"}]
+                ]
+            }
+            buttons = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_data"), InlineKeyboardButton("🔙 Back", callback_data="back_to_start")]])
+            
+            try:
+                await asyncio.to_thread(_bot_api_call, "editMessageText", {
+                    "chat_id": query.message.chat.id,
+                    "message_id": query.message.id,
+                    "text": _build_help_html(),
+                    "parse_mode": "HTML",
+                    "reply_markup": json.dumps(markup_dict),
+                })
+                return
+            except Exception:
+                pass
+            
+            try:
+                await query.message.edit_text(_build_help_plain(), reply_markup=buttons)
+            except MessageNotModified:
+                pass
         elif data == "open_about":
             about_text = (
                 "ℹ️ **About Save Restricted Content Bot**\n\n"
