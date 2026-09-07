@@ -17,9 +17,9 @@ async def start_handler(client: Client, message: Message):
         f"<blockquote>👋 <b>Welcome {first_name}!</b></blockquote>\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
         f"<blockquote>🚀 <b>What I Can Do:</b>\n"
-        f"• Save Restricted Post (Text, Media, Files)\n"
-        f"• Support Private & Public Channels\n"
-        f"• Batch/Bulk Mode Supported</blockquote>\n"
+        f"‣ Save Restricted Post (Text, Media, Files)\n"
+        f"‣ Support Private & Public Channels\n"
+        f"‣ Batch/Bulk Mode Supported</blockquote>\n"
         f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
     )
 
@@ -214,9 +214,9 @@ async def back_to_start(client: Client, query: CallbackQuery):
         f"<blockquote>👋 <b>Welcome {first_name}!</b></blockquote>\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
         f"<blockquote>🚀 <b>What I Can Do:</b>\n"
-        f"• Save Restricted Post (Text, Media, Files)\n"
-        f"• Support Private & Public Channels\n"
-        f"• Batch/Bulk Mode Supported</blockquote>\n"
+        f"‣ Save Restricted Post (Text, Media, Files)\n"
+        f"‣ Support Private & Public Channels\n"
+        f"‣ Batch/Bulk Mode Supported</blockquote>\n"
         f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
     )
 
