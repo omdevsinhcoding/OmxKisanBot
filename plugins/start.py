@@ -97,7 +97,7 @@ def _build_help_plain() -> str:
         "**Custom Caption:** /settings → Set Caption\n"
         "**Rename Rules:** /settings → Set Rename (delete/replace words)\n\n"
         "🤖 **Bot Content Extraction** (💎 Premium)\n\n"
-        "Extract restricted content from other bots!\n"
+        "**Extract restricted content from other bots!**\n"
         "Just send the bot's deep link like:\n"
         "`https://t.me/SomeBot?start=PARAM`\n\n"
         "Bot will extract all messages & media the target bot sends.\n"
