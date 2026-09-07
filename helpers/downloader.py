@@ -140,24 +140,32 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     await bot.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
             except Exception as e:
                 # Absolute Fallback: Try using user_client to upload if Bot throws PEER_ID_INVALID or isn't admin
-                if user_client:
+                fallback_client = user_client
+                if not fallback_client:
+                    from config import API_ID, API_HASH
+                    fallback_client = await get_user_client(user_id, API_ID, API_HASH)
+
+                if fallback_client:
                     try:
                         print(f"Bot failed sending to {dest_chat}, falling back to User Client...")
                         if source_msg.photo:
-                            await user_client.send_photo(dest_chat, photo=file_path, **kwargs)
+                            await fallback_client.send_photo(dest_chat, photo=file_path, **kwargs)
                         elif source_msg.video:
-                            await user_client.send_video(dest_chat, video=file_path, **kwargs)
+                            await fallback_client.send_video(dest_chat, video=file_path, **kwargs)
                         elif source_msg.audio:
-                            await user_client.send_audio(dest_chat, audio=file_path, **kwargs)
+                            await fallback_client.send_audio(dest_chat, audio=file_path, **kwargs)
                         elif source_msg.document:
-                            await user_client.send_document(dest_chat, document=file_path, **kwargs)
+                            await fallback_client.send_document(dest_chat, document=file_path, **kwargs)
                         else:
                             copy_kwargs = {"caption": final_caption}
                             if topic_id:
                                 copy_kwargs["reply_to_message_id"] = topic_id
-                            await user_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
+                            await fallback_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
                     except Exception as fallback_e:
                         print(f"User Client also failed uploading media to {dest_chat}: {fallback_e}")
+                    finally:
+                        if not user_client and fallback_client:
+                            await fallback_client.stop()
                 else:
                     print(f"Failed uploading media to {dest_chat}: {e}")
 
@@ -173,12 +181,20 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                 await bot.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs)
             except Exception as e:
                 # Absolute Fallback: Try using user_client for text
-                if user_client:
+                fallback_client = user_client
+                if not fallback_client:
+                    from config import API_ID, API_HASH
+                    fallback_client = await get_user_client(user_id, API_ID, API_HASH)
+
+                if fallback_client:
                     try:
                         print(f"Bot failed sending text to {dest_chat}, falling back to User Client...")
-                        await user_client.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs)
+                        await fallback_client.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs)
                     except Exception as fallback_e:
                         print(f"User Client also failed sending text to {dest_chat}: {fallback_e}")
+                    finally:
+                        if not user_client and fallback_client:
+                            await fallback_client.stop()
                 else:
                     print(f"Failed sending text to {dest_chat}: {e}")
 
