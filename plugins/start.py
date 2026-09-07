@@ -65,7 +65,7 @@ def _build_help_html() -> str:
         "<b>Custom Caption:</b> /settings → Set Caption\n"
         "<b>Rename Rules:</b> /settings → Set Rename (delete/replace words)</blockquote>\n\n"
         "🤖 <b>𝐁𝐨𝐭 𝐂𝐨𝐧𝐭𝐞𝐧𝐭 𝐄𝐱𝐭𝐫𝐚𝐜𝐭𝐢𝐨𝐧</b> (💎 Premium)\n\n"
-        "<blockquote>Extract restricted content from other bots!\n"
+        "<blockquote><b>Extract restricted content from other bots!</b>\n"
         "Just send the bot's deep link like:\n"
         "<code>https://t.me/SomeBot?start=PARAM</code>\n\n"
         "Bot will extract all messages &amp; media the target bot sends.\n"
