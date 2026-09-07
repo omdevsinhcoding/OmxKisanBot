@@ -218,31 +218,34 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     progress=tracker.progress_callback
                 )
 
-                upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
-                kwargs = {"caption": final_caption, "progress": upload_tracker.progress_callback, **kwargs_base}
-                if user_thumb:
-                    kwargs["thumb"] = user_thumb
-
-                if source_msg.photo:
-                    await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
-                elif source_msg.video:
-                    await send_client.send_video(dest_chat, video=file_path, **kwargs)
-                elif source_msg.audio:
-                    await send_client.send_audio(dest_chat, audio=file_path, **kwargs)
-                elif source_msg.document:
-                    await send_client.send_document(dest_chat, document=file_path, **kwargs)
-                elif source_msg.animation:
-                    await send_client.send_animation(dest_chat, animation=file_path, **kwargs)
-                elif source_msg.voice:
-                    await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption, **kwargs_base)
-                elif source_msg.video_note:
-                    await send_client.send_video_note(dest_chat, video_note=file_path, **kwargs_base)
-                else:
-                    # Fallback: copy_message for unsupported download types
+                if not file_path:
+                    # Download returned None (non-downloadable media) → fallback to copy
                     await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
+                else:
+                    upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
+                    kwargs = {"caption": final_caption, "progress": upload_tracker.progress_callback, **kwargs_base}
+                    if user_thumb:
+                        kwargs["thumb"] = user_thumb
 
-                if os.path.exists(file_path):
-                    os.remove(file_path)
+                    if source_msg.photo:
+                        await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
+                    elif source_msg.video:
+                        await send_client.send_video(dest_chat, video=file_path, **kwargs)
+                    elif source_msg.audio:
+                        await send_client.send_audio(dest_chat, audio=file_path, **kwargs)
+                    elif source_msg.document:
+                        await send_client.send_document(dest_chat, document=file_path, **kwargs)
+                    elif source_msg.animation:
+                        await send_client.send_animation(dest_chat, animation=file_path, **kwargs)
+                    elif source_msg.voice:
+                        await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption, **kwargs_base)
+                    elif source_msg.video_note:
+                        await send_client.send_video_note(dest_chat, video_note=file_path, **kwargs_base)
+                    else:
+                        await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
+
+                    if file_path and os.path.exists(file_path):
+                        os.remove(file_path)
             except Exception:
                 # If download+upload fails, try copy_message as last resort
                 try:
