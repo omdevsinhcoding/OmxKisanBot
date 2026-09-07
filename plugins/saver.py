@@ -9,7 +9,7 @@ from config import API_ID, API_HASH
 async def refresh_progress_listener(client: Client, query: CallbackQuery):
     await handle_refresh_callback(client, query)
 
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium"]))
+@Client.on_message(filters.incoming & filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium"]))
 async def single_post_saver(client: Client, message: Message):
     await auto_clean_chat(client, message)
     user_id = message.from_user.id

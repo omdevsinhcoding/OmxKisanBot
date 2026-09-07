@@ -203,7 +203,7 @@ async def settings_callbacks(client: Client, query: CallbackQuery):
     except Exception as e:
         print(f"Error in settings_callbacks: {e}")
 
-@Client.on_message(filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium"]))
+@Client.on_message(filters.incoming & filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium"]))
 async def text_settings_listener(client: Client, message: Message):
     user_id = message.from_user.id
     text_val = message.text.strip()

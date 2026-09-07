@@ -59,7 +59,7 @@ async def logout_handler(client: Client, message: Message):
         del LOGIN_STATES[user_id]
     await message.reply_text("🚪 **Logged out successfully!** Your saved session string has been deleted.")
 
-@Client.on_message(filters.text & filters.private & ~filters.command(["login", "logout", "check", "start", "stop", "help", "settings", "batch", "dl", "adl", "cancel", "id", "commands", "referral", "myplan", "premium"]))
+@Client.on_message(filters.incoming & filters.text & filters.private & ~filters.command(["login", "logout", "check", "start", "stop", "help", "settings", "batch", "dl", "adl", "cancel", "id", "commands", "referral", "myplan", "premium"]))
 async def login_step_listener(client: Client, message: Message):
     user_id = message.from_user.id
     if user_id not in LOGIN_STATES:
