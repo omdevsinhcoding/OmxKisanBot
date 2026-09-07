@@ -57,7 +57,22 @@ async def single_post_saver(client: Client, message: Message):
             skipped_count = 0
 
             total_posts = (end_id - start_id) + 1
-            await status.edit_text(f"🚀 **Starting Range Extraction ({total_posts} posts)...**")
+            base_link = f"https://t.me/c/{str(chat_id)[4:]}" if str(chat_id).startswith("-100") else f"https://t.me/{chat_id}"
+
+            # ── Batch Initialized message (pin it) ──
+            init_text = (
+                f"📦 **Batch Initialized**\n\n"
+                f"**Range:** {start_id} → {end_id}\n"
+                f"**Link:** {link}\n\n"
+                f"🔄 **Processing started...**\n"
+                f"🛑 Use /cancel to stop"
+            )
+            await status.edit_text(init_text)
+            try:
+                await status.pin(both_sides=True)
+            except Exception:
+                pass
+
             for current_id in range(start_id, end_id + 1):
                 sub_status = None
                 try:
@@ -78,7 +93,6 @@ async def single_post_saver(client: Client, message: Message):
                             pass
 
             elapsed = int(time.time() - start_time)
-            base_link = f"https://t.me/c/{str(chat_id)[4:]}" if str(chat_id).startswith("-100") else f"https://t.me/{chat_id}"
             
             text = (
                 "✅ <b>𝐁𝐚𝐭𝐜𝐡 𝐅𝐢𝐧𝐢𝐬𝐡𝐞𝐝</b>\n\n"

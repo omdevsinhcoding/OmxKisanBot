@@ -56,6 +56,23 @@ async def batch_range_command(client: Client, message: Message):
     failed_count = 0
     skipped_count = 0
 
+    base_link = f"https://t.me/c/{str(chat_id1)[4:]}" if str(chat_id1).startswith("-100") else f"https://t.me/{chat_id1}"
+    processed_link = f"{base_link}/{start_id}-{end_id}"
+
+    # ── Batch Initialized message (pin it) ──
+    init_text = (
+        f"📦 **Batch Initialized**\n\n"
+        f"**Range:** {start_id} → {end_id}\n"
+        f"**Link:** {processed_link}\n\n"
+        f"🔄 **Processing started...**\n"
+        f"🛑 Use /cancel to stop"
+    )
+    await status.edit_text(init_text)
+    try:
+        await status.pin(both_sides=True)
+    except Exception:
+        pass
+
     try:
         if is_priv1:
             user_client = await get_user_client(user_id, API_ID, API_HASH)
@@ -87,8 +104,6 @@ async def batch_range_command(client: Client, message: Message):
                         pass
 
         elapsed = int(time.time() - start_time)
-        base_link = f"https://t.me/c/{str(chat_id1)[4:]}" if str(chat_id1).startswith("-100") else f"https://t.me/{chat_id1}"
-        processed_link = f"{base_link}/{start_id}-{end_id}"
         
         text = (
             "✅ <b>𝐁𝐚𝐭𝐜𝐡 𝐅𝐢𝐧𝐢𝐬𝐡𝐞𝐝</b>\n\n"
