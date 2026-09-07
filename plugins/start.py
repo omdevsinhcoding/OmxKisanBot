@@ -19,7 +19,7 @@ def _build_start_html(first_name: str) -> str:
     safe_name = html_mod.escape(first_name)
     return (
         f"<blockquote>👋 <b>Welcome {safe_name}!</b></blockquote>\n\n"
-        f"I am the Advanced Save Restricted Content Bot.\n\n"
+        f"<b>I am the Advanced Save Restricted Content Bot.</b>\n\n"
         f"<blockquote>🚀 <b>What I Can Do:</b>\n"
         f"‣ Save Restricted Post (Text, Media, Files)\n"
         f"‣ Support Private &amp; Public Channels\n"
