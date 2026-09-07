@@ -5,6 +5,7 @@ from database.db import register_user
 from config import JOIN_LINK, ADMIN_CONTACT, BOT_TOKEN
 from helpers.cleaner import auto_clean_chat, protect_message
 import json
+import asyncio
 import urllib.request
 import html as html_mod
 
@@ -91,9 +92,9 @@ async def start_handler(client: Client, message: Message):
     first_name = message.from_user.first_name
     await register_user(user_id, message.from_user.username, first_name)
 
-    # Try Telegram Bot API directly for blockquotes
+    # Try Telegram Bot API directly for blockquotes (non-blocking via thread)
     try:
-        result = _bot_api_call("sendMessage", {
+        result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
             "chat_id": message.chat.id,
             "text": _build_start_html(first_name),
             "parse_mode": "HTML",
@@ -286,9 +287,9 @@ async def start_callbacks(client: Client, query: CallbackQuery):
 async def back_to_start(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name
 
-    # Try Bot API for blockquotes
+    # Try Bot API for blockquotes (non-blocking via thread)
     try:
-        _bot_api_call("editMessageText", {
+        await asyncio.to_thread(_bot_api_call, "editMessageText", {
             "chat_id": query.message.chat.id,
             "message_id": query.message.id,
             "text": _build_start_html(first_name),
