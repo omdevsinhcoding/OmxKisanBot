@@ -13,13 +13,13 @@ async def start_handler(client: Client, message: Message):
     await register_user(user_id, message.from_user.username, first_name)
 
     text = (
-        f"👋 **Welcome {first_name}!**\n\n"
+        f"> 👋 **Welcome {first_name}!**\n\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
-        f"🚀 **What I Can Do:**\n"
-        f"• Save Restricted Post (Text, Media, Files)\n"
-        f"• Support Private & Public Channels\n"
-        f"• Batch/Bulk Mode Supported\n\n"
-        f"⚠️ **Note:** You must `/login` to your account to use the downloading features."
+        f"> 🚀 **What I Can Do:**\n"
+        f"> • Save Restricted Post (Text, Media, Files)\n"
+        f"> • Support Private & Public Channels\n"
+        f"> • Batch/Bulk Mode Supported\n\n"
+        f"> ⚠️ **Note:** _You must `/login` to your account to use the downloading features._"
     )
 
     buttons = InlineKeyboardMarkup([
@@ -210,13 +210,13 @@ async def start_callbacks(client: Client, query: CallbackQuery):
 async def back_to_start(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name
     text = (
-        f"👋 **Welcome {first_name}!**\n\n"
+        f"> 👋 **Welcome {first_name}!**\n\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
-        f"🚀 **What I Can Do:**\n"
-        f"• Save Restricted Post (Text, Media, Files)\n"
-        f"• Support Private & Public Channels\n"
-        f"• Batch/Bulk Mode Supported\n\n"
-        f"⚠️ **Note:** You must `/login` to your account to use the downloading features."
+        f"> 🚀 **What I Can Do:**\n"
+        f"> • Save Restricted Post (Text, Media, Files)\n"
+        f"> • Support Private & Public Channels\n"
+        f"> • Batch/Bulk Mode Supported\n\n"
+        f"> ⚠️ **Note:** _You must `/login` to your account to use the downloading features._"
     )
 
     buttons = InlineKeyboardMarkup([
