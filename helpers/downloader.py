@@ -67,7 +67,7 @@ async def get_user_client(user_id: int, api_id: int, api_hash: str):
         print(f"Error starting user client for {user_id}: {e}")
         return None
 
-async def process_and_send_message(bot: Client, user_id: int, source_msg: Message, target_chat_id: int, status_msg: Message):
+async def process_and_send_message(bot: Client, user_id: int, source_msg: Message, target_chat_id: int, status_msg: Message, user_client: Client = None):
     tracker = ProgressTracker(status_msg, action_text="📥 Downloading Media")
     
     settings = await get_user_settings(user_id)
@@ -139,24 +139,25 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                         copy_kwargs["reply_to_message_id"] = topic_id
                     await bot.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
             except Exception as e:
-                if "PEER_ID_INVALID" in str(e) and str(dest_chat).startswith("-") and not str(dest_chat).startswith("-100"):
-                    new_dest = int(f"-100{str(dest_chat)[1:]}")
+                # Absolute Fallback: Try using user_client to upload if Bot throws PEER_ID_INVALID or isn't admin
+                if user_client:
                     try:
+                        print(f"Bot failed sending to {dest_chat}, falling back to User Client...")
                         if source_msg.photo:
-                            await bot.send_photo(new_dest, photo=file_path, **kwargs)
+                            await user_client.send_photo(dest_chat, photo=file_path, **kwargs)
                         elif source_msg.video:
-                            await bot.send_video(new_dest, video=file_path, **kwargs)
+                            await user_client.send_video(dest_chat, video=file_path, **kwargs)
                         elif source_msg.audio:
-                            await bot.send_audio(new_dest, audio=file_path, **kwargs)
+                            await user_client.send_audio(dest_chat, audio=file_path, **kwargs)
                         elif source_msg.document:
-                            await bot.send_document(new_dest, document=file_path, **kwargs)
+                            await user_client.send_document(dest_chat, document=file_path, **kwargs)
                         else:
                             copy_kwargs = {"caption": final_caption}
                             if topic_id:
                                 copy_kwargs["reply_to_message_id"] = topic_id
-                            await bot.copy_message(new_dest, source_msg.chat.id, source_msg.id, **copy_kwargs)
-                    except Exception as e2:
-                        print(f"Failed uploading media to fallback ID {new_dest}: {e2}")
+                            await user_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
+                    except Exception as fallback_e:
+                        print(f"User Client also failed uploading media to {dest_chat}: {fallback_e}")
                 else:
                     print(f"Failed uploading media to {dest_chat}: {e}")
 
@@ -171,12 +172,13 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     kwargs["reply_to_message_id"] = topic_id
                 await bot.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs)
             except Exception as e:
-                if "PEER_ID_INVALID" in str(e) and str(dest_chat).startswith("-") and not str(dest_chat).startswith("-100"):
-                    new_dest = int(f"-100{str(dest_chat)[1:]}")
+                # Absolute Fallback: Try using user_client for text
+                if user_client:
                     try:
-                        await bot.send_message(new_dest, text=final_caption or source_msg.text, **kwargs)
-                    except Exception as e2:
-                        print(f"Failed sending text to fallback ID {new_dest}: {e2}")
+                        print(f"Bot failed sending text to {dest_chat}, falling back to User Client...")
+                        await user_client.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs)
+                    except Exception as fallback_e:
+                        print(f"User Client also failed sending text to {dest_chat}: {fallback_e}")
                 else:
                     print(f"Failed sending text to {dest_chat}: {e}")
 

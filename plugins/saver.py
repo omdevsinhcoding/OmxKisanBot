@@ -47,7 +47,7 @@ async def single_post_saver(client: Client, message: Message):
             if not source_msg or source_msg.empty:
                 return await status.edit_text("❌ **Could not fetch message!** Make sure link is correct and bot/user has access.")
 
-            await process_and_send_message(client, user_id, source_msg, message.chat.id, status)
+            await process_and_send_message(client, user_id, source_msg, message.chat.id, status, user_client)
             await status.edit_text("✅ **Task Complete!**")
         else:
             # Range Link (e.g. 135 to 137)
@@ -58,7 +58,7 @@ async def single_post_saver(client: Client, message: Message):
                     source_msg = await fetch_client.get_messages(chat_id, current_id)
                     if source_msg and not source_msg.empty:
                         sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
-                        await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status)
+                        await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status, user_client)
                         await sub_status.delete()
                 except Exception as e:
                     print(f"Skipping post {current_id}: {e}")
