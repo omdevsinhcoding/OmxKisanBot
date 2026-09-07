@@ -158,11 +158,6 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         original_caption = original_caption.replace(old_word, new_word)
     final_caption = custom_caption_template.replace("{caption}", original_caption) if custom_caption_template else original_caption
 
-    # kwargs for forum topics
-    kwargs_base = {}
-    if thread_id:
-        kwargs_base["reply_to_message_id"] = thread_id
-
     # Get or create user_client
     local_user_client = user_client
     created_local = False
@@ -179,21 +174,46 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
 
     sent_ok = False
 
-    # ── STRATEGY 1: copy_message (instant, handles ALL message types) ──
-    for c in clients_to_try:
+    # ── STRATEGY 1: Direct Bot API copyMessage (supports message_thread_id properly) ──
+    if thread_id:
         try:
-            await force_resolve_peer(c, dest_chat)
-            await force_resolve_peer(c, source_msg.chat.id)
-            copy_kwargs = {**kwargs_base}
-            if source_msg.media and source_msg.caption is not None:
-                copy_kwargs["caption"] = final_caption
-            await c.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
-            sent_ok = True
-            break
+            import urllib.request, json
+            from config import BOT_TOKEN
+            payload = {
+                "chat_id": dest_chat,
+                "from_chat_id": source_msg.chat.id,
+                "message_id": source_msg.id,
+                "message_thread_id": thread_id,
+            }
+            if source_msg.media and source_msg.caption is not None and final_caption:
+                payload["caption"] = final_caption
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/copyMessage"
+            def _do_copy():
+                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            result = await asyncio.to_thread(_do_copy)
+            if result.get("ok"):
+                sent_ok = True
         except Exception as e:
-            print(f"copy_message failed ({type(c).__name__}): {e}")
+            print(f"Bot API copyMessage failed: {e}")
 
-    # ── STRATEGY 2: Download + re-upload (for restricted channels) ──
+    # ── STRATEGY 2: Pyrogram copy_message (no topic, or if Bot API failed) ──
+    if not sent_ok:
+        for c in clients_to_try:
+            try:
+                await force_resolve_peer(c, dest_chat)
+                await force_resolve_peer(c, source_msg.chat.id)
+                copy_kwargs = {}
+                if source_msg.media and source_msg.caption is not None:
+                    copy_kwargs["caption"] = final_caption
+                await c.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
+                sent_ok = True
+                break
+            except Exception as e:
+                print(f"copy_message failed ({type(c).__name__}): {e}")
+
+    # ── STRATEGY 3: Download + re-upload ──
     if not sent_ok and source_msg.media:
         send_client = None
         for c in clients_to_try:
@@ -210,7 +230,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                 )
                 if file_path:
                     up_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
-                    kwargs = {"caption": final_caption, "progress": up_tracker.progress_callback, **kwargs_base}
+                    kwargs = {"caption": final_caption, "progress": up_tracker.progress_callback}
 
                     if source_msg.photo:
                         await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
@@ -223,11 +243,11 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     elif source_msg.animation:
                         await send_client.send_animation(dest_chat, animation=file_path, **kwargs)
                     elif source_msg.voice:
-                        await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption, **kwargs_base)
+                        await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption)
                     elif source_msg.video_note:
-                        await send_client.send_video_note(dest_chat, video_note=file_path, **kwargs_base)
+                        await send_client.send_video_note(dest_chat, video_note=file_path)
                     elif source_msg.sticker:
-                        await send_client.send_sticker(dest_chat, sticker=file_path, **kwargs_base)
+                        await send_client.send_sticker(dest_chat, sticker=file_path)
                     else:
                         await send_client.send_document(dest_chat, document=file_path, **kwargs)
                     sent_ok = True
@@ -237,12 +257,12 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             except Exception as e:
                 print(f"Download+upload failed: {e}")
 
-    # ── STRATEGY 3: Text fallback ──
+    # ── STRATEGY 4: Text fallback ──
     if not sent_ok and (source_msg.text or final_caption):
         for c in clients_to_try:
             try:
                 await force_resolve_peer(c, dest_chat)
-                await c.send_message(dest_chat, text=final_caption or source_msg.text or "", **kwargs_base)
+                await c.send_message(dest_chat, text=final_caption or source_msg.text or "")
                 sent_ok = True
                 break
             except Exception as e:
@@ -257,3 +277,4 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             await local_user_client.stop()
         except Exception:
             pass
+
