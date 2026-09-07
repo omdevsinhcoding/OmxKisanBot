@@ -1,9 +1,110 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, raw
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
-from pyrogram.enums import ParseMode
+from pyrogram.errors import MessageNotModified
 from database.db import register_user
 from config import JOIN_LINK, ADMIN_CONTACT
 from helpers.cleaner import auto_clean_chat, protect_message
+
+
+# ─── Blockquote Helper ───────────────────────────────────────────────
+# Pyrogram's HTML parser does NOT support <blockquote> on older versions.
+# We bypass it entirely by constructing raw MessageEntityBlockquote
+# entities and editing the message via Pyrogram's raw API layer.
+
+def _utf16_len(s: str) -> int:
+    """Telegram uses UTF-16 code units for entity offsets."""
+    return len(s.encode('utf-16-le')) // 2
+
+
+def _build_start_content(first_name: str):
+    """Build /start message text + raw entities with blockquotes."""
+    bq1 = f"👋 Welcome {first_name}!"
+    mid = "\nI am the Advanced Save Restricted Content Bot.\n\n"
+    bq2 = (
+        "🚀 What I Can Do:\n"
+        "‣ Save Restricted Post (Text, Media, Files)\n"
+        "‣ Support Private & Public Channels\n"
+        "‣ Batch/Bulk Mode Supported"
+    )
+    sep = "\n"
+    bq3 = "⚠️ Note: You must /login to your account to use the downloading features."
+
+    full_text = bq1 + mid + bq2 + sep + bq3
+    entities = []
+
+    # ── Blockquote 1: Welcome ──
+    o1 = 0
+    entities.append(raw.types.MessageEntityBlockquote(offset=o1, length=_utf16_len(bq1)))
+    entities.append(raw.types.MessageEntityBold(
+        offset=_utf16_len("👋 "),
+        length=_utf16_len(f"Welcome {first_name}!")
+    ))
+
+    # ── Blockquote 2: What I Can Do ──
+    o2 = _utf16_len(bq1 + mid)
+    entities.append(raw.types.MessageEntityBlockquote(offset=o2, length=_utf16_len(bq2)))
+    entities.append(raw.types.MessageEntityBold(
+        offset=o2 + _utf16_len("🚀 "),
+        length=_utf16_len("What I Can Do:")
+    ))
+
+    # ── Blockquote 3: Note ──
+    o3 = _utf16_len(bq1 + mid + bq2 + sep)
+    entities.append(raw.types.MessageEntityBlockquote(offset=o3, length=_utf16_len(bq3)))
+    entities.append(raw.types.MessageEntityBold(
+        offset=o3 + _utf16_len("⚠️ "),
+        length=_utf16_len("Note:")
+    ))
+    italic_text = "You must /login to your account to use the downloading features."
+    italic_offset = o3 + _utf16_len("⚠️ Note: ")
+    entities.append(raw.types.MessageEntityItalic(
+        offset=italic_offset,
+        length=_utf16_len(italic_text)
+    ))
+    code_offset = italic_offset + _utf16_len("You must ")
+    entities.append(raw.types.MessageEntityCode(
+        offset=code_offset,
+        length=_utf16_len("/login")
+    ))
+
+    return full_text, entities
+
+
+def _start_buttons():
+    """Inline keyboard for /start (high-level Pyrogram types)."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🆘 How To Use", callback_data="open_help"),
+            InlineKeyboardButton("ℹ️ About Bot", callback_data="open_about")
+        ],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")],
+        [
+            InlineKeyboardButton("📢 Official Channel ↗", url=JOIN_LINK),
+            InlineKeyboardButton("👨‍💻 Developer ↗", url=ADMIN_CONTACT)
+        ]
+    ])
+
+
+def _start_raw_markup():
+    """Inline keyboard for /start (raw types for EditMessage)."""
+    return raw.types.ReplyInlineMarkup(
+        rows=[
+            raw.types.KeyboardButtonRow(buttons=[
+                raw.types.KeyboardButtonCallback(text="🆘 How To Use", data=b"open_help"),
+                raw.types.KeyboardButtonCallback(text="ℹ️ About Bot", data=b"open_about"),
+            ]),
+            raw.types.KeyboardButtonRow(buttons=[
+                raw.types.KeyboardButtonCallback(text="⚙️ Settings", data=b"open_settings"),
+            ]),
+            raw.types.KeyboardButtonRow(buttons=[
+                raw.types.KeyboardButtonUrl(text="📢 Official Channel ↗", url=JOIN_LINK),
+                raw.types.KeyboardButtonUrl(text="👨‍💻 Developer ↗", url=ADMIN_CONTACT),
+            ]),
+        ]
+    )
+
+
+# ─── Command Handlers ────────────────────────────────────────────────
 
 @Client.on_message(filters.command("start") & filters.private)
 async def start_handler(client: Client, message: Message):
@@ -13,32 +114,27 @@ async def start_handler(client: Client, message: Message):
     first_name = message.from_user.first_name
     await register_user(user_id, message.from_user.username, first_name)
 
-    text = (
-        f"<blockquote>👋 <b>Welcome {first_name}!</b></blockquote>\n"
-        f"I am the Advanced Save Restricted Content Bot.\n\n"
-        f"<blockquote>🚀 <b>What I Can Do:</b>\n"
-        f"‣ Save Restricted Post (Text, Media, Files)\n"
-        f"‣ Support Private & Public Channels\n"
-        f"‣ Batch/Bulk Mode Supported</blockquote>\n"
-        f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
-    )
+    text, entities = _build_start_content(first_name)
 
-    buttons = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🆘 How To Use", callback_data="open_help"),
-            InlineKeyboardButton("ℹ️ About Bot", callback_data="open_about")
-        ],
-        [
-            InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")
-        ],
-        [
-            InlineKeyboardButton("📢 Official Channel ↗", url=JOIN_LINK),
-            InlineKeyboardButton("👨‍💻 Developer ↗", url=ADMIN_CONTACT)
-        ]
-    ])
-
-    reply_msg = await message.reply_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
+    # Step 1: Send the message normally (gets us reply + message ID)
+    reply_msg = await message.reply_text(text, reply_markup=_start_buttons())
     protect_message(message.chat.id, reply_msg.id)
+
+    # Step 2: Immediately edit via raw API to inject blockquote entities
+    try:
+        peer = await client.resolve_peer(message.chat.id)
+        await client.invoke(
+            raw.functions.messages.EditMessage(
+                peer=peer,
+                id=reply_msg.id,
+                message=text,
+                entities=entities,
+                reply_markup=_start_raw_markup()
+            )
+        )
+    except Exception as e:
+        print(f"Blockquote formatting edit failed: {e}")
+
 
 @Client.on_message(filters.command("stop") & filters.private)
 async def stop_handler(client: Client, message: Message):
@@ -168,7 +264,8 @@ async def premium_info_handler(client: Client, message: Message):
     )
     await message.reply_text(text)
 
-from pyrogram.errors import MessageNotModified
+
+# ─── Callback Handlers ───────────────────────────────────────────────
 
 @Client.on_callback_query(filters.regex("^(open_help|open_about)$"))
 async def start_callbacks(client: Client, query: CallbackQuery):
@@ -210,32 +307,18 @@ async def start_callbacks(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name
-    text = (
-        f"<blockquote>👋 <b>Welcome {first_name}!</b></blockquote>\n"
-        f"I am the Advanced Save Restricted Content Bot.\n\n"
-        f"<blockquote>🚀 <b>What I Can Do:</b>\n"
-        f"‣ Save Restricted Post (Text, Media, Files)\n"
-        f"‣ Support Private & Public Channels\n"
-        f"‣ Batch/Bulk Mode Supported</blockquote>\n"
-        f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
-    )
-
-    buttons = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("🆘 How To Use", callback_data="open_help"),
-            InlineKeyboardButton("ℹ️ About Bot", callback_data="open_about")
-        ],
-        [
-            InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")
-        ],
-        [
-            InlineKeyboardButton("📢 Official Channel ↗", url=JOIN_LINK),
-            InlineKeyboardButton("👨‍💻 Developer ↗", url=ADMIN_CONTACT)
-        ]
-    ])
+    text, entities = _build_start_content(first_name)
 
     try:
-        await query.message.edit_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
-    except MessageNotModified:
+        peer = await client.resolve_peer(query.message.chat.id)
+        await client.invoke(
+            raw.functions.messages.EditMessage(
+                peer=peer,
+                id=query.message.id,
+                message=text,
+                entities=entities,
+                reply_markup=_start_raw_markup()
+            )
+        )
+    except Exception:
         pass
-
