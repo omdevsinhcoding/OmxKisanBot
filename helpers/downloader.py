@@ -122,7 +122,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             if user_thumb:
                 kwargs["thumb"] = user_thumb
             if topic_id:
-                kwargs["message_thread_id"] = topic_id
+                kwargs["reply_to_message_id"] = topic_id
 
             try:
                 if source_msg.photo:
@@ -136,7 +136,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                 else:
                     copy_kwargs = {"caption": final_caption}
                     if topic_id:
-                        copy_kwargs["message_thread_id"] = topic_id
+                        copy_kwargs["reply_to_message_id"] = topic_id
                     await bot.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
             except Exception as e:
                 if "PEER_ID_INVALID" in str(e) and str(dest_chat).startswith("-") and not str(dest_chat).startswith("-100"):
@@ -153,7 +153,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                         else:
                             copy_kwargs = {"caption": final_caption}
                             if topic_id:
-                                copy_kwargs["message_thread_id"] = topic_id
+                                copy_kwargs["reply_to_message_id"] = topic_id
                             await bot.copy_message(new_dest, source_msg.chat.id, source_msg.id, **copy_kwargs)
                     except Exception as e2:
                         print(f"Failed uploading media to fallback ID {new_dest}: {e2}")
@@ -168,7 +168,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             try:
                 kwargs = {}
                 if topic_id:
-                    kwargs["message_thread_id"] = topic_id
+                    kwargs["reply_to_message_id"] = topic_id
                 await bot.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs)
             except Exception as e:
                 if "PEER_ID_INVALID" in str(e) and str(dest_chat).startswith("-") and not str(dest_chat).startswith("-100"):
