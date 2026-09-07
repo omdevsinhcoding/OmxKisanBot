@@ -133,11 +133,9 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
     settings = await get_user_settings(user_id)
     custom_caption_template = settings.get("custom_caption")
     replacements = settings.get("replacements", {})
-    send_pm = settings.get("send_pm", "On")
     upload_data = settings.get("set_upload_data")
 
-    # Determine destination targets [(chat_id, message_thread_id)]
-    targets = []
+    # Determine destination
     custom_chat_id = None
     thread_id = None
 
@@ -152,25 +150,20 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             except Exception as e:
                 print(f"Error parsing set_upload_data: {e}")
 
-    if custom_chat_id:
-        targets.append((custom_chat_id, thread_id))
-    else:
-        targets.append((target_chat_id, None))
+    dest_chat = custom_chat_id if custom_chat_id else target_chat_id
 
-    # Calculate caption
+    # Caption
     original_caption = source_msg.caption or source_msg.text or ""
     for old_word, new_word in replacements.items():
         original_caption = original_caption.replace(old_word, new_word)
-
     final_caption = custom_caption_template.replace("{caption}", original_caption) if custom_caption_template else original_caption
 
-    # --- RESOLVE PEERS BEFORE SENDING ---
-    # This is the critical step: we must force both bot and user_client to
-    # recognize the destination chat BEFORE we try to send anything.
-    # Without this, Pyrogram throws PEER_ID_INVALID because its internal
-    # cache doesn't know about the chat yet.
-    
-    # Get or create the user_client for fallback
+    # kwargs for forum topics
+    kwargs_base = {}
+    if thread_id:
+        kwargs_base["message_thread_id"] = thread_id
+
+    # Get or create user_client
     local_user_client = user_client
     created_local = False
     if not local_user_client:
@@ -178,55 +171,46 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         local_user_client = await get_user_client(user_id, API_ID, API_HASH)
         created_local = True
 
-    for dest_chat, topic_id in targets:
-        # Determine which client can actually reach the destination
+    # Build list of clients to try (user_client first — it has access to more chats)
+    clients_to_try = []
+    if local_user_client:
+        clients_to_try.append(local_user_client)
+    clients_to_try.append(bot)
+
+    sent_ok = False
+
+    # ── STRATEGY 1: copy_message (instant, handles ALL message types) ──
+    for c in clients_to_try:
+        try:
+            await force_resolve_peer(c, dest_chat)
+            await force_resolve_peer(c, source_msg.chat.id)
+            copy_kwargs = {**kwargs_base}
+            if source_msg.media and source_msg.caption is not None:
+                copy_kwargs["caption"] = final_caption
+            await c.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
+            sent_ok = True
+            break
+        except Exception as e:
+            print(f"copy_message failed ({type(c).__name__}): {e}")
+
+    # ── STRATEGY 2: Download + re-upload (for restricted channels) ──
+    if not sent_ok and source_msg.media:
         send_client = None
+        for c in clients_to_try:
+            if await force_resolve_peer(c, dest_chat):
+                send_client = c
+                break
         
-        # Try bot first
-        bot_resolved = await force_resolve_peer(bot, dest_chat)
-        if bot_resolved:
-            send_client = bot
-        
-        # Try user_client if bot failed
-        if not send_client and local_user_client:
-            user_resolved = await force_resolve_peer(local_user_client, dest_chat)
-            if user_resolved:
-                send_client = local_user_client
-        
-        if not send_client:
-            continue
-
-        # Now send using whichever client resolved the peer
-        kwargs_base = {}
-        if topic_id:
-            kwargs_base["message_thread_id"] = topic_id
-
-        user_thumb = settings.get("thumbnail_id")
-        if user_thumb and not os.path.exists(user_thumb):
-            user_thumb = None
-
-        # ── STRATEGY: copy_message first (handles ALL types), download+upload only for custom thumb ──
-        
-        needs_download = bool(user_thumb and source_msg.media)
-        sent_ok = False
-        
-        if needs_download:
-            # Custom thumbnail set → must download and re-upload
+        if send_client:
             try:
                 os.makedirs("downloads", exist_ok=True)
                 file_path = await source_msg.download(
                     file_name="downloads/",
                     progress=tracker.progress_callback
                 )
-
-                if not file_path:
-                    await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
-                    sent_ok = True
-                else:
-                    upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
-                    kwargs = {"caption": final_caption, "progress": upload_tracker.progress_callback, **kwargs_base}
-                    if user_thumb:
-                        kwargs["thumb"] = user_thumb
+                if file_path:
+                    up_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
+                    kwargs = {"caption": final_caption, "progress": up_tracker.progress_callback, **kwargs_base}
 
                     if source_msg.photo:
                         await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
@@ -242,48 +226,34 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                         await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption, **kwargs_base)
                     elif source_msg.video_note:
                         await send_client.send_video_note(dest_chat, video_note=file_path, **kwargs_base)
+                    elif source_msg.sticker:
+                        await send_client.send_sticker(dest_chat, sticker=file_path, **kwargs_base)
                     else:
-                        await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
+                        await send_client.send_document(dest_chat, document=file_path, **kwargs)
                     sent_ok = True
 
-                    if file_path and os.path.exists(file_path):
+                    if os.path.exists(file_path):
                         os.remove(file_path)
             except Exception as e:
                 print(f"Download+upload failed: {e}")
-                # If download+upload fails, try copy_message as last resort
-                try:
-                    await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
-                    sent_ok = True
-                except Exception as e2:
-                    print(f"Copy fallback also failed: {e2}")
-        else:
-            # ── PRIMARY METHOD: copy_message (handles EVERYTHING) ──
+
+    # ── STRATEGY 3: Text fallback ──
+    if not sent_ok and (source_msg.text or final_caption):
+        for c in clients_to_try:
             try:
-                copy_kwargs = {**kwargs_base}
-                if source_msg.media and hasattr(source_msg, 'caption'):
-                    copy_kwargs["caption"] = final_caption
-                await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
+                await force_resolve_peer(c, dest_chat)
+                await c.send_message(dest_chat, text=final_caption or source_msg.text or "", **kwargs_base)
                 sent_ok = True
+                break
             except Exception as e:
-                print(f"Copy_message failed: {e}")
-                # Fallback: try sending as text
-                if source_msg.text or final_caption:
-                    try:
-                        await send_client.send_message(dest_chat, text=final_caption or source_msg.text or "", **kwargs_base)
-                        sent_ok = True
-                    except Exception as e2:
-                        print(f"Send_message fallback also failed: {e2}")
+                print(f"send_message failed ({type(c).__name__}): {e}")
 
-        if not sent_ok:
-            raise Exception(f"Failed to send message to {dest_chat}")
+    if not sent_ok:
+        raise Exception(f"All strategies failed for dest={dest_chat}")
 
-    # Cleanup: stop user_client only if we created it locally
+    # Cleanup
     if created_local and local_user_client:
         try:
             await local_user_client.stop()
         except Exception:
             pass
-
-
-
-
