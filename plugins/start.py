@@ -4,17 +4,14 @@ from pyrogram.errors import MessageNotModified
 from database.db import register_user
 from config import JOIN_LINK, ADMIN_CONTACT, BOT_TOKEN
 from helpers.cleaner import auto_clean_chat, protect_message
-import requests
 import json
-import asyncio
+import urllib.request
 import html as html_mod
 
 
 # ─── Telegram Bot API Direct Call ─────────────────────────────────────
-# Pyrogram's HTML parser and raw types DON'T support <blockquote> on
-# older versions. We bypass Pyrogram entirely by calling the Telegram
-# Bot API over HTTP — this is the official API that 100% supports
-# <blockquote> since Bot API 7.0 (Dec 2023).
+# Pyrogram's HTML parser doesn't support <blockquote>.
+# We call Telegram Bot API over HTTP using stdlib urllib.
 
 def _build_start_html(first_name: str) -> str:
     """Build /start HTML text with <blockquote> tags."""
@@ -30,8 +27,21 @@ def _build_start_html(first_name: str) -> str:
     )
 
 
+def _build_start_plain(first_name: str) -> str:
+    """Fallback plain text (no blockquotes) if Bot API call fails."""
+    return (
+        f"👋 **Welcome {first_name}!**\n\n"
+        f"I am the Advanced Save Restricted Content Bot.\n\n"
+        f"🚀 **What I Can Do:**\n"
+        f"‣ Save Restricted Post (Text, Media, Files)\n"
+        f"‣ Support Private & Public Channels\n"
+        f"‣ Batch/Bulk Mode Supported\n\n"
+        f"⚠️ **Note:** _You must `/login` to your account to use the downloading features._"
+    )
+
+
 def _start_markup_dict() -> dict:
-    """Build inline keyboard as dict for Bot API JSON."""
+    """Inline keyboard dict for Bot API."""
     return {
         "inline_keyboard": [
             [
@@ -47,35 +57,28 @@ def _start_markup_dict() -> dict:
     }
 
 
-async def _send_start_via_api(chat_id: int, first_name: str, reply_to: int = None) -> dict:
-    """Send /start message via Telegram Bot API directly (guaranteed blockquotes)."""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": _build_start_html(first_name),
-        "parse_mode": "HTML",
-        "reply_markup": json.dumps(_start_markup_dict()),
-    }
-    if reply_to:
-        payload["reply_to_message_id"] = reply_to
+def _start_buttons():
+    """Inline keyboard for Pyrogram fallback."""
+    return InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("🆘 How To Use", callback_data="open_help"),
+            InlineKeyboardButton("ℹ️ About Bot", callback_data="open_about")
+        ],
+        [InlineKeyboardButton("⚙️ Settings", callback_data="open_settings")],
+        [
+            InlineKeyboardButton("📢 Official Channel ↗", url=JOIN_LINK),
+            InlineKeyboardButton("👨‍💻 Developer ↗", url=ADMIN_CONTACT)
+        ]
+    ])
 
-    result = await asyncio.to_thread(requests.post, url, json=payload)
-    return result.json()
 
-
-async def _edit_start_via_api(chat_id: int, message_id: int, first_name: str) -> dict:
-    """Edit message to /start format via Telegram Bot API (guaranteed blockquotes)."""
-    url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-    payload = {
-        "chat_id": chat_id,
-        "message_id": message_id,
-        "text": _build_start_html(first_name),
-        "parse_mode": "HTML",
-        "reply_markup": json.dumps(_start_markup_dict()),
-    }
-
-    result = await asyncio.to_thread(requests.post, url, json=payload)
-    return result.json()
+def _bot_api_call(method: str, payload: dict) -> dict:
+    """Call Telegram Bot API directly via urllib (stdlib, always available)."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 # ─── Command Handlers ────────────────────────────────────────────────
@@ -88,15 +91,27 @@ async def start_handler(client: Client, message: Message):
     first_name = message.from_user.first_name
     await register_user(user_id, message.from_user.username, first_name)
 
-    # Send via Telegram Bot API directly (bypasses Pyrogram's broken HTML parser)
-    result = await _send_start_via_api(
-        chat_id=message.chat.id,
-        first_name=first_name,
-        reply_to=message.id
-    )
+    # Try Telegram Bot API directly for blockquotes
+    try:
+        result = _bot_api_call("sendMessage", {
+            "chat_id": message.chat.id,
+            "text": _build_start_html(first_name),
+            "parse_mode": "HTML",
+            "reply_markup": json.dumps(_start_markup_dict()),
+            "reply_to_message_id": message.id,
+        })
+        if result.get("ok"):
+            sent_id = result["result"]["message_id"]
+            protect_message(message.chat.id, sent_id)
+            return
+    except Exception as e:
+        print(f"Bot API blockquote send failed: {e}")
 
-    if result.get("ok") and result.get("result", {}).get("message_id"):
-        protect_message(message.chat.id, result["result"]["message_id"])
+    # Fallback: Pyrogram without blockquotes (bot will always respond)
+    reply_msg = await message.reply_text(
+        _build_start_plain(first_name), reply_markup=_start_buttons()
+    )
+    protect_message(message.chat.id, reply_msg.id)
 
 
 @Client.on_message(filters.command("stop") & filters.private)
@@ -271,12 +286,23 @@ async def start_callbacks(client: Client, query: CallbackQuery):
 async def back_to_start(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name
 
-    # Edit via Telegram Bot API directly (guaranteed blockquotes)
+    # Try Bot API for blockquotes
     try:
-        await _edit_start_via_api(
-            chat_id=query.message.chat.id,
-            message_id=query.message.id,
-            first_name=first_name
+        _bot_api_call("editMessageText", {
+            "chat_id": query.message.chat.id,
+            "message_id": query.message.id,
+            "text": _build_start_html(first_name),
+            "parse_mode": "HTML",
+            "reply_markup": json.dumps(_start_markup_dict()),
+        })
+        return
+    except Exception as e:
+        print(f"Bot API edit failed: {e}")
+
+    # Fallback: Pyrogram without blockquotes
+    try:
+        await query.message.edit_text(
+            _build_start_plain(first_name), reply_markup=_start_buttons()
         )
-    except Exception:
+    except MessageNotModified:
         pass
