@@ -1,5 +1,6 @@
 from pyrogram import Client, filters
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from pyrogram.enums import ParseMode
 from database.db import register_user
 from config import JOIN_LINK, ADMIN_CONTACT
 from helpers.cleaner import auto_clean_chat, protect_message
@@ -13,13 +14,13 @@ async def start_handler(client: Client, message: Message):
     await register_user(user_id, message.from_user.username, first_name)
 
     text = (
-        f"> 👋 **Welcome {first_name}!**\n\n"
+        f"<blockquote>👋 <b>Welcome {first_name}!</b></blockquote>\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
-        f"> 🚀 **What I Can Do:**\n"
-        f"> • Save Restricted Post (Text, Media, Files)\n"
-        f"> • Support Private & Public Channels\n"
-        f"> • Batch/Bulk Mode Supported\n\n"
-        f"> ⚠️ **Note:** _You must `/login` to your account to use the downloading features._"
+        f"<blockquote>🚀 <b>What I Can Do:</b>\n"
+        f"• Save Restricted Post (Text, Media, Files)\n"
+        f"• Support Private & Public Channels\n"
+        f"• Batch/Bulk Mode Supported</blockquote>\n"
+        f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
     )
 
     buttons = InlineKeyboardMarkup([
@@ -36,7 +37,7 @@ async def start_handler(client: Client, message: Message):
         ]
     ])
 
-    reply_msg = await message.reply_text(text, reply_markup=buttons)
+    reply_msg = await message.reply_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
     protect_message(message.chat.id, reply_msg.id)
 
 @Client.on_message(filters.command("stop") & filters.private)
@@ -210,13 +211,13 @@ async def start_callbacks(client: Client, query: CallbackQuery):
 async def back_to_start(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name
     text = (
-        f"> 👋 **Welcome {first_name}!**\n\n"
+        f"<blockquote>👋 <b>Welcome {first_name}!</b></blockquote>\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
-        f"> 🚀 **What I Can Do:**\n"
-        f"> • Save Restricted Post (Text, Media, Files)\n"
-        f"> • Support Private & Public Channels\n"
-        f"> • Batch/Bulk Mode Supported\n\n"
-        f"> ⚠️ **Note:** _You must `/login` to your account to use the downloading features._"
+        f"<blockquote>🚀 <b>What I Can Do:</b>\n"
+        f"• Save Restricted Post (Text, Media, Files)\n"
+        f"• Support Private & Public Channels\n"
+        f"• Batch/Bulk Mode Supported</blockquote>\n"
+        f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
     )
 
     buttons = InlineKeyboardMarkup([
@@ -234,7 +235,7 @@ async def back_to_start(client: Client, query: CallbackQuery):
     ])
 
     try:
-        await query.message.edit_text(text, reply_markup=buttons)
+        await query.message.edit_text(text, reply_markup=buttons, parse_mode=ParseMode.HTML)
     except MessageNotModified:
         pass
 
