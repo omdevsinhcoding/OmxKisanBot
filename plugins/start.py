@@ -65,7 +65,7 @@ def _build_help_html() -> str:
         "<b>Custom Caption:</b> /settings → Set Caption\n"
         "<b>Rename Rules:</b> /settings → Set Rename (delete/replace words)</blockquote>\n\n"
         "🤖 <b>𝐁𝐨𝐭 𝐂𝐨𝐧𝐭𝐞𝐧𝐭 𝐄𝐱𝐭𝐫𝐚𝐜𝐭𝐢𝐨𝐧</b> (💎 Premium)\n\n"
-        "<blockquote><b>Extract restricted content from other bots!</b>\n"
+        "<blockquote>Extract restricted content from other bots!\n"
         "Just send the bot's deep link like:\n"
         "<code>https://t.me/SomeBot?start=PARAM</code>\n\n"
         "Bot will extract all messages &amp; media the target bot sends.\n"
@@ -97,7 +97,7 @@ def _build_help_plain() -> str:
         "**Custom Caption:** /settings → Set Caption\n"
         "**Rename Rules:** /settings → Set Rename (delete/replace words)\n\n"
         "🤖 **Bot Content Extraction** (💎 Premium)\n\n"
-        "**Extract restricted content from other bots!**\n"
+        "Extract restricted content from other bots!\n"
         "Just send the bot's deep link like:\n"
         "`https://t.me/SomeBot?start=PARAM`\n\n"
         "Bot will extract all messages & media the target bot sends.\n"
@@ -315,7 +315,7 @@ async def start_callbacks(client: Client, query: CallbackQuery):
         if data == "open_help":
             markup_dict = {
                 "inline_keyboard": [
-                    [{"text": "❌ Close", "callback_data": "close_data"}, {"text": "🔙 Back", "callback_data": "back_to_start"}]
+                    [{"text": "❌ Close", "callback_data": "close_data", "style": "danger"}, {"text": "🔙 Back", "callback_data": "back_to_start"}]
                 ]
             }
             buttons = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_data"), InlineKeyboardButton("🔙 Back", callback_data="back_to_start")]])
@@ -372,4 +372,12 @@ async def back_to_start(client: Client, query: CallbackQuery):
             _build_start_plain(first_name), reply_markup=_start_buttons()
         )
     except MessageNotModified:
+        pass
+
+
+@Client.on_callback_query(filters.regex("^close_data$"))
+async def close_callback(client: Client, query: CallbackQuery):
+    try:
+        await query.message.delete()
+    except Exception:
         pass
