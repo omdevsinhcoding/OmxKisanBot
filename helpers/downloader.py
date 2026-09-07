@@ -186,17 +186,14 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         bot_resolved = await force_resolve_peer(bot, dest_chat)
         if bot_resolved:
             send_client = bot
-            print(f"✅ Bot resolved peer {dest_chat} successfully")
         
         # Try user_client if bot failed
         if not send_client and local_user_client:
             user_resolved = await force_resolve_peer(local_user_client, dest_chat)
             if user_resolved:
                 send_client = local_user_client
-                print(f"✅ User Client resolved peer {dest_chat} successfully")
         
         if not send_client:
-            print(f"❌ Neither bot nor user client could resolve peer {dest_chat}")
             continue
 
         # Now send using whichever client resolved the peer
@@ -232,8 +229,8 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                 else:
                     copy_kwargs = {"caption": final_caption, **kwargs_base}
                     await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
-            except Exception as e:
-                print(f"❌ Failed uploading media to {dest_chat}: {e}")
+            except Exception:
+                pass
 
             if os.path.exists(file_path):
                 os.remove(file_path)
@@ -241,8 +238,8 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             # Text message
             try:
                 await send_client.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs_base)
-            except Exception as e:
-                print(f"❌ Failed sending text to {dest_chat}: {e}")
+            except Exception:
+                pass
 
     # Cleanup: stop user_client only if we created it locally
     if created_local and local_user_client:
