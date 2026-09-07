@@ -161,7 +161,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
     # kwargs for forum topics
     kwargs_base = {}
     if thread_id:
-        kwargs_base["message_thread_id"] = thread_id
+        kwargs_base["reply_to_message_id"] = thread_id
 
     # Get or create user_client
     local_user_client = user_client
