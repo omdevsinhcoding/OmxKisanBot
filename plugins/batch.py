@@ -1,4 +1,4 @@
-from pyrogram import Client, filters
+from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message
 from config import API_ID, API_HASH
@@ -86,17 +86,43 @@ async def batch_range_command(client: Client, message: Message):
         processed_link = f"{base_link}/{start_id}-{end_id}"
         
         text = (
-            "✅ **Batch Finished**\n\n"
-            f"**Original Link:** {processed_link}\n"
-            f"**Range:** {start_id} ➔ {end_id}\n"
-            f"**Success:** {success_count}\n"
-            f"**Skipped:** {skipped_count} (deleted/service msgs)\n"
-            f"**Failed:** {failed_count}\n"
-            f"**Processed Link:** {processed_link}\n"
-            f"**Last Processed:** {base_link}/{end_id}\n"
-            f"**Time:** {elapsed}s"
+            "✅ <b>𝐁𝐚𝐭𝐜𝐡 𝐅𝐢𝐧𝐢𝐬𝐡𝐞𝐝</b>\n\n"
+            "<blockquote>"
+            f"<b>Original Link:</b> <code>{processed_link}</code>\n"
+            f"<b>Range:</b> {start_id} ➔ {end_id}"
+            "</blockquote>\n\n"
+            "📊 <b>𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬</b>\n\n"
+            "<blockquote>"
+            f"<b>Success:</b> {success_count}\n"
+            f"<b>Skipped:</b> {skipped_count} <i>(deleted/service msgs)</i>\n"
+            f"<b>Failed:</b> {failed_count}"
+            "</blockquote>\n\n"
+            "🔗 <b>𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐞𝐝 𝐋𝐢𝐧𝐤𝐬</b>\n\n"
+            "<blockquote>"
+            f"<b>Processed Link:</b> <code>{processed_link}</code>\n"
+            f"<b>Last Processed:</b> <code>{base_link}/{end_id}</code>"
+            "</blockquote>\n\n"
+            f"⏱ <b>𝐓𝐢𝐦𝐞 𝐓𝐚𝐤𝐞𝐧:</b> {elapsed}s"
         )
-        await status.edit_text(text, disable_web_page_preview=True)
+        try:
+            import asyncio, urllib.request, json
+            from config import BOT_TOKEN
+            payload = {
+                "chat_id": status.chat.id,
+                "message_id": status.id,
+                "text": text,
+                "parse_mode": "HTML",
+                "disable_web_page_preview": True
+            }
+            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
+            def _do_api():
+                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+                with urllib.request.urlopen(req, timeout=10) as resp:
+                    return json.loads(resp.read().decode("utf-8"))
+            await asyncio.to_thread(_do_api)
+        except Exception as e:
+            print(f"Bot API edit failed: {e}")
+            await status.edit_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
 
     except Exception as e:
         await status.edit_text(f"❌ **Batch Error:** `{e}`")
