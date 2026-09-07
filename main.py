@@ -57,8 +57,8 @@ async def send_status_notification(is_online: bool):
     for owner in OWNER_ID:
         try:
             await app.send_message(owner, msg)
-        except Exception as e:
-            print(f"Owner PM notification error ({owner}): {e}")
+        except Exception:
+            pass  # Silently ignore to prevent console confusion
 
 async def main():
     async with app:
