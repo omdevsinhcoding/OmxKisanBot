@@ -18,12 +18,12 @@ def _build_start_html(first_name: str) -> str:
     """Build /start HTML text with <blockquote> tags."""
     safe_name = html_mod.escape(first_name)
     return (
-        f"<blockquote>👋 <b>Welcome {safe_name}!</b></blockquote>\n"
+        f"<blockquote>👋 <b>Welcome {safe_name}!</b></blockquote>\n\n"
         f"I am the Advanced Save Restricted Content Bot.\n\n"
         f"<blockquote>🚀 <b>What I Can Do:</b>\n"
         f"‣ Save Restricted Post (Text, Media, Files)\n"
         f"‣ Support Private &amp; Public Channels\n"
-        f"‣ Batch/Bulk Mode Supported</blockquote>\n"
+        f"‣ Batch/Bulk Mode Supported</blockquote>\n\n"
         f"<blockquote>⚠️ <b>Note:</b> <i>You must <code>/login</code> to your account to use the downloading features.</i></blockquote>"
     )
 
