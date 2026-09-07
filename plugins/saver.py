@@ -59,18 +59,23 @@ async def single_post_saver(client: Client, message: Message):
             total_posts = (end_id - start_id) + 1
             await status.edit_text(f"🚀 **Starting Range Extraction ({total_posts} posts)...**")
             for current_id in range(start_id, end_id + 1):
+                sub_status = None
                 try:
                     source_msg = await fetch_client.get_messages(chat_id, current_id)
-                    if source_msg and not source_msg.empty:
-                        sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
-                        await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status, user_client)
-                        await sub_status.delete()
-                        success_count += 1
-                    else:
+                    if not source_msg or source_msg.empty or source_msg.service:
                         skipped_count += 1
-                except Exception as e:
-                    print(f"Skipping post {current_id}: {e}")
+                        continue
+                    sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
+                    await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status, user_client)
+                    success_count += 1
+                except Exception:
                     failed_count += 1
+                finally:
+                    if sub_status:
+                        try:
+                            await sub_status.delete()
+                        except Exception:
+                            pass
 
             elapsed = int(time.time() - start_time)
             base_link = f"https://t.me/c/{str(chat_id)[4:]}" if str(chat_id).startswith("-100") else f"https://t.me/{chat_id}"

@@ -68,18 +68,23 @@ async def batch_range_command(client: Client, message: Message):
                 break
 
             fetch_client = user_client if is_priv1 else client
+            sub_status = None
             try:
                 msg = await fetch_client.get_messages(chat_id1, current_id)
-                if msg and not msg.empty:
-                    sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
-                    await process_and_send_message(client, user_id, msg, message.chat.id, sub_status)
-                    await sub_status.delete()
-                    success_count += 1
-                else:
+                if not msg or msg.empty or msg.service:
                     skipped_count += 1
-            except Exception as e:
-                print(f"Skipping post {current_id}: {e}")
+                    continue
+                sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
+                await process_and_send_message(client, user_id, msg, message.chat.id, sub_status)
+                success_count += 1
+            except Exception:
                 failed_count += 1
+            finally:
+                if sub_status:
+                    try:
+                        await sub_status.delete()
+                    except Exception:
+                        pass
 
         elapsed = int(time.time() - start_time)
         base_link = f"https://t.me/c/{str(chat_id1)[4:]}" if str(chat_id1).startswith("-100") else f"https://t.me/{chat_id1}"

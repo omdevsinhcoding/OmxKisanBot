@@ -201,23 +201,28 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         if topic_id:
             kwargs_base["reply_to_message_id"] = topic_id
 
-        if source_msg.media:
-            os.makedirs("downloads", exist_ok=True)
-            file_path = await source_msg.download(
-                file_name="downloads/",
-                progress=tracker.progress_callback
-            )
+        user_thumb = settings.get("thumbnail_id")
+        if user_thumb and not os.path.exists(user_thumb):
+            user_thumb = None
 
-            upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
-            user_thumb = settings.get("thumbnail_id")
-            if user_thumb and not os.path.exists(user_thumb):
-                user_thumb = None
-
-            kwargs = {"caption": final_caption, "progress": upload_tracker.progress_callback, **kwargs_base}
-            if user_thumb:
-                kwargs["thumb"] = user_thumb
-
+        # ── STRATEGY: copy_message first (handles ALL types), download+upload only for custom thumb ──
+        
+        needs_download = bool(user_thumb and source_msg.media)
+        
+        if needs_download:
+            # Custom thumbnail set → must download and re-upload
             try:
+                os.makedirs("downloads", exist_ok=True)
+                file_path = await source_msg.download(
+                    file_name="downloads/",
+                    progress=tracker.progress_callback
+                )
+
+                upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
+                kwargs = {"caption": final_caption, "progress": upload_tracker.progress_callback, **kwargs_base}
+                if user_thumb:
+                    kwargs["thumb"] = user_thumb
+
                 if source_msg.photo:
                     await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
                 elif source_msg.video:
@@ -226,20 +231,39 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     await send_client.send_audio(dest_chat, audio=file_path, **kwargs)
                 elif source_msg.document:
                     await send_client.send_document(dest_chat, document=file_path, **kwargs)
+                elif source_msg.animation:
+                    await send_client.send_animation(dest_chat, animation=file_path, **kwargs)
+                elif source_msg.voice:
+                    await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption, **kwargs_base)
+                elif source_msg.video_note:
+                    await send_client.send_video_note(dest_chat, video_note=file_path, **kwargs_base)
                 else:
-                    copy_kwargs = {"caption": final_caption, **kwargs_base}
-                    await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
-            except Exception:
-                pass
+                    # Fallback: copy_message for unsupported download types
+                    await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
 
-            if os.path.exists(file_path):
-                os.remove(file_path)
-        else:
-            # Text message
-            try:
-                await send_client.send_message(dest_chat, text=final_caption or source_msg.text, **kwargs_base)
+                if os.path.exists(file_path):
+                    os.remove(file_path)
             except Exception:
-                pass
+                # If download+upload fails, try copy_message as last resort
+                try:
+                    await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, caption=final_caption, **kwargs_base)
+                except Exception:
+                    pass
+        else:
+            # ── PRIMARY METHOD: copy_message (handles EVERYTHING: media, text, location, sticker, poll, contact, etc.) ──
+            try:
+                copy_kwargs = {**kwargs_base}
+                # Only set caption for media messages (not locations, contacts, polls, etc.)
+                if source_msg.media and hasattr(source_msg, 'caption'):
+                    copy_kwargs["caption"] = final_caption
+                await send_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id, **copy_kwargs)
+            except Exception:
+                # Fallback: try sending as text if copy fails and message has text content
+                if source_msg.text or final_caption:
+                    try:
+                        await send_client.send_message(dest_chat, text=final_caption or source_msg.text or "", **kwargs_base)
+                    except Exception:
+                        pass
 
     # Cleanup: stop user_client only if we created it locally
     if created_local and local_user_client:
@@ -247,5 +271,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             await local_user_client.stop()
         except Exception:
             pass
+
+
 
 
