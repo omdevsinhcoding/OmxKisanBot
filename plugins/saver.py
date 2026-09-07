@@ -50,7 +50,12 @@ async def single_post_saver(client: Client, message: Message):
             await process_and_send_message(client, user_id, source_msg, message.chat.id, status, user_client)
             await status.edit_text("✅ **Task Complete!**")
         else:
-            # Range Link (e.g. 135 to 137)
+            import time
+            start_time = time.time()
+            success_count = 0
+            failed_count = 0
+            skipped_count = 0
+
             total_posts = (end_id - start_id) + 1
             await status.edit_text(f"🚀 **Starting Range Extraction ({total_posts} posts)...**")
             for current_id in range(start_id, end_id + 1):
@@ -60,10 +65,28 @@ async def single_post_saver(client: Client, message: Message):
                         sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
                         await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status, user_client)
                         await sub_status.delete()
+                        success_count += 1
+                    else:
+                        skipped_count += 1
                 except Exception as e:
                     print(f"Skipping post {current_id}: {e}")
+                    failed_count += 1
 
-            await status.edit_text("✅ **Batch Completed!**")
+            elapsed = int(time.time() - start_time)
+            base_link = f"https://t.me/c/{str(chat_id)[4:]}" if str(chat_id).startswith("-100") else f"https://t.me/{chat_id}"
+            
+            text = (
+                "✅ **Batch Finished**\n\n"
+                f"**Original Link:** {link}\n"
+                f"**Range:** {start_id} ➔ {end_id}\n"
+                f"**Success:** {success_count}\n"
+                f"**Skipped:** {skipped_count} (deleted/service msgs)\n"
+                f"**Failed:** {failed_count}\n"
+                f"**Processed Link:** {base_link}/{start_id}-{end_id}\n"
+                f"**Last Processed:** {base_link}/{end_id}\n"
+                f"**Time:** {elapsed}s"
+            )
+            await status.edit_text(text, disable_web_page_preview=True)
 
     except Exception as e:
         await status.edit_text(f"❌ **Error:** `{e}`")

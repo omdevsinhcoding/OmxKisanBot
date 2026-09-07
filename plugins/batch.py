@@ -50,6 +50,12 @@ async def batch_range_command(client: Client, message: Message):
     BATCH_CANCEL_FLAGS[user_id] = False
 
     user_client = None
+    import time
+    start_time = time.time()
+    success_count = 0
+    failed_count = 0
+    skipped_count = 0
+
     try:
         if is_priv1:
             user_client = await get_user_client(user_id, API_ID, API_HASH)
@@ -68,10 +74,29 @@ async def batch_range_command(client: Client, message: Message):
                     sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
                     await process_and_send_message(client, user_id, msg, message.chat.id, sub_status)
                     await sub_status.delete()
+                    success_count += 1
+                else:
+                    skipped_count += 1
             except Exception as e:
                 print(f"Skipping post {current_id}: {e}")
+                failed_count += 1
 
-        await status.edit_text("✅ **Batch Completed!**")
+        elapsed = int(time.time() - start_time)
+        base_link = f"https://t.me/c/{str(chat_id1)[4:]}" if str(chat_id1).startswith("-100") else f"https://t.me/{chat_id1}"
+        processed_link = f"{base_link}/{start_id}-{end_id}"
+        
+        text = (
+            "✅ **Batch Finished**\n\n"
+            f"**Original Link:** {processed_link}\n"
+            f"**Range:** {start_id} ➔ {end_id}\n"
+            f"**Success:** {success_count}\n"
+            f"**Skipped:** {skipped_count} (deleted/service msgs)\n"
+            f"**Failed:** {failed_count}\n"
+            f"**Processed Link:** {processed_link}\n"
+            f"**Last Processed:** {base_link}/{end_id}\n"
+            f"**Time:** {elapsed}s"
+        )
+        await status.edit_text(text, disable_web_page_preview=True)
 
     except Exception as e:
         await status.edit_text(f"❌ **Batch Error:** `{e}`")
