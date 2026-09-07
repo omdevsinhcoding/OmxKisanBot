@@ -199,6 +199,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         # Now send using whichever client resolved the peer
         kwargs_base = {}
         if topic_id:
+            kwargs_base["message_thread_id"] = topic_id
             kwargs_base["reply_to_message_id"] = topic_id
 
         user_thumb = settings.get("thumbnail_id")
