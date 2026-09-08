@@ -287,7 +287,7 @@ async def commands_handler(client: Client, message: Message):
     
     markup_dict = {
         "inline_keyboard": [
-            [{"text": "❌ Close", "callback_data": "close_data"}]
+            [{"text": "❌ Close", "callback_data": "close_data", "style": "danger"}]
         ]
     }
     buttons = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_data")]])
