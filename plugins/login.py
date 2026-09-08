@@ -88,16 +88,60 @@ async def login_handler(client: Client, message: Message):
 @Client.on_callback_query(filters.regex("^start_login_flow$"))
 async def start_login_callback(client: Client, query):
     user_id = query.from_user.id
-    LOGIN_STATES[user_id] = {"step": "PHONE"}
+    import time
+    login_id = time.time()
+    LOGIN_STATES[user_id] = {"step": "PHONE", "id": login_id}
+    
     try:
-        await query.message.edit_text(
-            "📱 **Telegram Account Login**\n\n"
-            "Please send your phone number registered with Telegram in international format (with country code).\n"
-            "Example: `+919876543210`",
-            reply_markup=None
-        )
+        # Remove buttons from original message
+        await query.message.edit_reply_markup(reply_markup=None)
     except Exception:
         pass
+
+    text = (
+        "━━━━━━━━━━━━━━━━━━━━\n\n"
+        "Send your number with country code.\n"
+        "Example: `+19876543210`\n\n"
+        "⏱ _You have 3 minutes._\n"
+        "_Send /cancellogin to stop._"
+    )
+    
+    try:
+        sent_msg = await query.message.reply_text(text, quote=True)
+        protect_message(query.message.chat.id, sent_msg.id)
+    except Exception:
+        pass
+
+    # Start 3-minute timer
+    async def login_timeout():
+        import asyncio
+        await asyncio.sleep(180)
+        state = LOGIN_STATES.get(user_id)
+        # Check if they are still on the PHONE step for this specific login attempt
+        if state and state.get("id") == login_id and state.get("step") == "PHONE":
+            del LOGIN_STATES[user_id]
+            timeout_text = (
+                "⏱ **Timed out.**\n\n"
+                "Phone number not received in 3 minutes.\n"
+                "Send `/login` to try again."
+            )
+            try:
+                await client.send_message(query.message.chat.id, timeout_text)
+            except Exception:
+                pass
+
+    import asyncio
+    asyncio.create_task(login_timeout())
+
+@Client.on_message(filters.command("cancellogin") & filters.private)
+async def cancellogin_handler(client: Client, message: Message):
+    await auto_clean_chat(client, message)
+    user_id = message.from_user.id
+    if user_id in LOGIN_STATES:
+        del LOGIN_STATES[user_id]
+        await message.reply_text("🛑 **Login process cancelled.**")
+    else:
+        await message.reply_text("❌ **You are not currently in a login process.**")
 
 @Client.on_message(filters.command("check") & filters.private)
 async def check_handler(client: Client, message: Message):
