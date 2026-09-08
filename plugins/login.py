@@ -101,13 +101,14 @@ async def start_login_callback(client: Client, query):
     text = (
         "━━━━━━━━━━━━━━━━━━━━\n\n"
         "Send your number with country code.\n"
-        "Example: `+19876543210`\n\n"
-        "⏱ _You have 3 minutes._\n"
-        "_Send /cancellogin to stop._"
+        "Example: <code>+19876543210</code>\n\n"
+        "⏱ <i>You have 3 minutes.</i>\n"
+        "<i>Send /cancellogin to stop.</i>"
     )
     
     try:
-        sent_msg = await query.message.reply_text(text, quote=True)
+        from pyrogram import enums
+        sent_msg = await query.message.reply_text(text, quote=True, parse_mode=enums.ParseMode.HTML)
         protect_message(query.message.chat.id, sent_msg.id)
     except Exception:
         pass
