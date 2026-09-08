@@ -1,29 +1,62 @@
 import os
 import re
+import json
 import asyncio
+import urllib.request
 from pyrogram import Client, raw
 from pyrogram.types import Message
 from helpers.progress import ProgressTracker
 from database.db import get_session, get_thumbnail, get_caption, get_replacements, get_user_settings
+from config import BOT_TOKEN
+
+
+def _bot_api_call(method: str, payload: dict) -> dict:
+    """Call Telegram Bot API directly via urllib."""
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        return json.loads(resp.read().decode("utf-8"))
+
+
+def _bot_api_upload(method: str, fields: dict, file_field: str, file_path: str) -> dict:
+    """Upload a file to Telegram Bot API using multipart/form-data."""
+    import mimetypes
+    boundary = "----PythonBotUpload"
+    body = b""
+    
+    for key, value in fields.items():
+        body += f"--{boundary}\r\n".encode()
+        body += f'Content-Disposition: form-data; name="{key}"\r\n\r\n'.encode()
+        body += f"{value}\r\n".encode()
+    
+    filename = os.path.basename(file_path)
+    mime_type = mimetypes.guess_type(file_path)[0] or "application/octet-stream"
+    body += f"--{boundary}\r\n".encode()
+    body += f'Content-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'.encode()
+    body += f"Content-Type: {mime_type}\r\n\r\n".encode()
+    with open(file_path, "rb") as f:
+        body += f.read()
+    body += f"\r\n--{boundary}--\r\n".encode()
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/{method}"
+    req = urllib.request.Request(url, data=body, headers={
+        "Content-Type": f"multipart/form-data; boundary={boundary}"
+    })
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        return json.loads(resp.read().decode("utf-8"))
 
 
 async def force_resolve_peer(client: Client, chat_id):
     """
     Force-resolve a chat_id into Pyrogram's internal peer cache.
-    This bypasses the PEER_ID_INVALID error by using Pyrogram's raw API
-    to ask Telegram's server directly for the channel info.
-    
-    When the bot/user IS a member of the channel/group, Telegram returns 
-    the real data even with access_hash=0, and Pyrogram caches it automatically.
     """
-    # Method 1: Try normal resolve first (works if peer is already cached)
     try:
         await client.resolve_peer(chat_id)
         return True
     except Exception:
         pass
 
-    # Method 2: Try get_dialogs to populate cache (works for user accounts)
     try:
         async for dialog in client.get_dialogs(limit=200):
             if dialog.chat and dialog.chat.id == chat_id:
@@ -31,15 +64,12 @@ async def force_resolve_peer(client: Client, chat_id):
     except Exception:
         pass
 
-    # Method 3: Try normal resolve again (get_dialogs may have cached it)
     try:
         await client.resolve_peer(chat_id)
         return True
     except Exception:
         pass
 
-    # Method 4: Raw API - channels.GetChannels with access_hash=0
-    # Works when bot/user is a member; Telegram ignores invalid access_hash for members
     str_id = str(chat_id)
     if str_id.startswith("-100"):
         channel_id = int(str_id[4:])
@@ -54,18 +84,13 @@ async def force_resolve_peer(client: Client, chat_id):
             )
             return True
         except Exception as e:
-            print(f"Raw GetChannels also failed for {chat_id}: {e}")
+            print(f"Raw GetChannels failed for {chat_id}: {e}")
 
     return False
 
 def parse_tg_link(link: str):
     """
     Parses Telegram message link.
-    Supports:
-    - https://t.me/c/1234567890/123 -> private chat single (-1001234567890, 123, 123, True)
-    - https://t.me/c/1234567890/123-125 -> private chat range (-1001234567890, 123, 125, True)
-    - https://t.me/channel_username/123 -> public chat single ("channel_username", 123, 123, False)
-    - https://t.me/channel_username/123-125 -> public chat range ("channel_username", 123, 125, False)
     """
     link = link.strip()
     pattern_private_range = r"t\.me/c/(\d+)/(\d+)-(\d+)"
@@ -115,7 +140,6 @@ async def get_user_client(user_id: int, api_id: int, api_hash: str):
         )
         await user_client.start()
         
-        # Proactively populate the in-memory peer cache to prevent PEER_ID_INVALID
         try:
             async for _ in user_client.get_dialogs(limit=100):
                 pass
@@ -126,6 +150,7 @@ async def get_user_client(user_id: int, api_id: int, api_hash: str):
     except Exception as e:
         print(f"Error starting user client for {user_id}: {e}")
         return None
+
 
 async def process_and_send_message(bot: Client, user_id: int, source_msg: Message, target_chat_id: int, status_msg: Message, user_client: Client = None):
     tracker = ProgressTracker(status_msg, action_text="📥 Downloading Media")
@@ -166,7 +191,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         local_user_client = await get_user_client(user_id, API_ID, API_HASH)
         created_local = True
 
-    # Build list of clients to try (user_client first — it has access to more chats)
+    # Build list of clients
     clients_to_try = []
     if local_user_client:
         clients_to_try.append(local_user_client)
@@ -174,32 +199,14 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
 
     sent_ok = False
 
-    # ── STRATEGY 1: Direct Bot API copyMessage (supports message_thread_id properly) ──
-    if thread_id:
-        try:
-            import urllib.request, json
-            from config import BOT_TOKEN
-            payload = {
-                "chat_id": dest_chat,
-                "from_chat_id": source_msg.chat.id,
-                "message_id": source_msg.id,
-                "message_thread_id": thread_id,
-            }
-            if source_msg.media and source_msg.caption is not None and final_caption:
-                payload["caption"] = final_caption
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/copyMessage"
-            def _do_copy():
-                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
-            result = await asyncio.to_thread(_do_copy)
-            if result.get("ok"):
-                sent_ok = True
-        except Exception as e:
-            print(f"Bot API copyMessage failed: {e}")
-
-    # ── STRATEGY 2: Pyrogram copy_message (no topic, or if Bot API failed) ──
-    if not sent_ok:
+    # ══════════════════════════════════════════════════════════════
+    # STRATEGY 1: User client copy_message (works for ALL msg types)
+    #   - user_client has access to both source and dest
+    #   - If no topic, this is the fastest and best method
+    #   - If topic is set, messages go to General (no topic kwarg)
+    #     so we only use this when there's NO topic
+    # ══════════════════════════════════════════════════════════════
+    if not thread_id:
         for c in clients_to_try:
             try:
                 await force_resolve_peer(c, dest_chat)
@@ -211,62 +218,131 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                 sent_ok = True
                 break
             except Exception as e:
-                print(f"copy_message failed ({type(c).__name__}): {e}")
+                print(f"Pyrogram copy_message failed ({type(c).__name__}): {e}")
 
-    # ── STRATEGY 3: Download + re-upload ──
+    # ══════════════════════════════════════════════════════════════
+    # STRATEGY 2: Download + Bot API upload (for topic routing)
+    #   - Download file via user_client (has source access)
+    #   - Upload via Bot API with message_thread_id (topic routing)
+    # ══════════════════════════════════════════════════════════════
     if not sent_ok and source_msg.media:
-        send_client = None
-        for c in clients_to_try:
-            if await force_resolve_peer(c, dest_chat):
-                send_client = c
-                break
-        
-        if send_client:
-            try:
-                os.makedirs("downloads", exist_ok=True)
-                file_path = await source_msg.download(
-                    file_name="downloads/",
-                    progress=tracker.progress_callback
-                )
-                if file_path:
-                    up_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
-                    kwargs = {"caption": final_caption, "progress": up_tracker.progress_callback}
+        try:
+            os.makedirs("downloads", exist_ok=True)
+            file_path = await source_msg.download(
+                file_name="downloads/",
+                progress=tracker.progress_callback
+            )
+            if file_path and os.path.exists(file_path):
+                if thread_id:
+                    # Upload via Bot API with message_thread_id
+                    fields = {"chat_id": str(dest_chat), "message_thread_id": str(thread_id)}
+                    if final_caption:
+                        fields["caption"] = final_caption
 
+                    api_method = None
+                    file_field = None
                     if source_msg.photo:
-                        await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
+                        api_method, file_field = "sendPhoto", "photo"
                     elif source_msg.video:
-                        await send_client.send_video(dest_chat, video=file_path, **kwargs)
+                        api_method, file_field = "sendVideo", "video"
                     elif source_msg.audio:
-                        await send_client.send_audio(dest_chat, audio=file_path, **kwargs)
+                        api_method, file_field = "sendAudio", "audio"
                     elif source_msg.document:
-                        await send_client.send_document(dest_chat, document=file_path, **kwargs)
+                        api_method, file_field = "sendDocument", "document"
                     elif source_msg.animation:
-                        await send_client.send_animation(dest_chat, animation=file_path, **kwargs)
+                        api_method, file_field = "sendAnimation", "animation"
                     elif source_msg.voice:
-                        await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption)
+                        api_method, file_field = "sendVoice", "voice"
                     elif source_msg.video_note:
-                        await send_client.send_video_note(dest_chat, video_note=file_path)
+                        api_method, file_field = "sendVideoNote", "video_note"
+                        fields.pop("caption", None)
                     elif source_msg.sticker:
-                        await send_client.send_sticker(dest_chat, sticker=file_path)
+                        api_method, file_field = "sendSticker", "sticker"
+                        fields.pop("caption", None)
                     else:
-                        await send_client.send_document(dest_chat, document=file_path, **kwargs)
-                    sent_ok = True
+                        api_method, file_field = "sendDocument", "document"
 
-                    if os.path.exists(file_path):
-                        os.remove(file_path)
-            except Exception as e:
-                print(f"Download+upload failed: {e}")
+                    result = await asyncio.to_thread(_bot_api_upload, api_method, fields, file_field, file_path)
+                    if result.get("ok"):
+                        sent_ok = True
+                else:
+                    # No topic — upload via Pyrogram (faster for large files with progress)
+                    send_client = None
+                    for c in clients_to_try:
+                        if await force_resolve_peer(c, dest_chat):
+                            send_client = c
+                            break
+                    
+                    if send_client:
+                        up_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
+                        kwargs = {"caption": final_caption, "progress": up_tracker.progress_callback}
 
-    # ── STRATEGY 4: Text fallback ──
+                        if source_msg.photo:
+                            await send_client.send_photo(dest_chat, photo=file_path, **kwargs)
+                        elif source_msg.video:
+                            await send_client.send_video(dest_chat, video=file_path, **kwargs)
+                        elif source_msg.audio:
+                            await send_client.send_audio(dest_chat, audio=file_path, **kwargs)
+                        elif source_msg.document:
+                            await send_client.send_document(dest_chat, document=file_path, **kwargs)
+                        elif source_msg.animation:
+                            await send_client.send_animation(dest_chat, animation=file_path, **kwargs)
+                        elif source_msg.voice:
+                            await send_client.send_voice(dest_chat, voice=file_path, caption=final_caption)
+                        elif source_msg.video_note:
+                            await send_client.send_video_note(dest_chat, video_note=file_path)
+                        elif source_msg.sticker:
+                            await send_client.send_sticker(dest_chat, sticker=file_path)
+                        else:
+                            await send_client.send_document(dest_chat, document=file_path, **kwargs)
+                        sent_ok = True
+
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+        except Exception as e:
+            print(f"Download+upload failed: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # STRATEGY 3: Text/non-downloadable message via Bot API
+    # ══════════════════════════════════════════════════════════════
     if not sent_ok and (source_msg.text or final_caption):
+        if thread_id:
+            # Use Bot API sendMessage with message_thread_id
+            try:
+                result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
+                    "chat_id": dest_chat,
+                    "text": final_caption or source_msg.text or "",
+                    "message_thread_id": thread_id,
+                })
+                if result.get("ok"):
+                    sent_ok = True
+            except Exception as e:
+                print(f"Bot API sendMessage failed: {e}")
+        
+        if not sent_ok:
+            for c in clients_to_try:
+                try:
+                    await force_resolve_peer(c, dest_chat)
+                    await c.send_message(dest_chat, text=final_caption or source_msg.text or "")
+                    sent_ok = True
+                    break
+                except Exception as e:
+                    print(f"Pyrogram send_message failed ({type(c).__name__}): {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # STRATEGY 4: Bot API forwardMessage (last resort for non-downloadable)
+    # ══════════════════════════════════════════════════════════════
+    if not sent_ok:
+        # Try user_client copy without topic (at least saves the content)
         for c in clients_to_try:
             try:
                 await force_resolve_peer(c, dest_chat)
-                await c.send_message(dest_chat, text=final_caption or source_msg.text or "")
+                await force_resolve_peer(c, source_msg.chat.id)
+                await c.copy_message(dest_chat, source_msg.chat.id, source_msg.id)
                 sent_ok = True
                 break
             except Exception as e:
-                print(f"send_message failed ({type(c).__name__}): {e}")
+                print(f"Last resort copy failed ({type(c).__name__}): {e}")
 
     if not sent_ok:
         raise Exception(f"All strategies failed for dest={dest_chat}")
@@ -277,4 +353,3 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             await local_user_client.stop()
         except Exception:
             pass
-
