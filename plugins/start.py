@@ -156,27 +156,25 @@ async def start_handler(client: Client, message: Message):
     first_name = message.from_user.first_name
     await register_user(user_id, message.from_user.username, first_name)
 
-    # Try Telegram Bot API directly for blockquotes (non-blocking via thread)
-    try:
-        result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
-            "chat_id": message.chat.id,
-            "text": _build_start_html(first_name),
-            "parse_mode": "HTML",
-            "reply_markup": json.dumps(_start_markup_dict()),
-            "reply_to_message_id": message.id,
-        })
-        if result.get("ok"):
-            sent_id = result["result"]["message_id"]
-            protect_message(message.chat.id, sent_id)
-            return
-    except Exception as e:
-        print(f"Bot API blockquote send failed: {e}")
-
-    # Fallback: Pyrogram without blockquotes (bot will always respond)
+    # Send instantly via Pyrogram to avoid lag
     reply_msg = await message.reply_text(
         _build_start_plain(first_name), reply_markup=_start_buttons()
     )
     protect_message(message.chat.id, reply_msg.id)
+
+    # Upgrade blockquotes and button styles in background via Bot API
+    def _upgrade():
+        try:
+            _bot_api_call("editMessageText", {
+                "chat_id": message.chat.id,
+                "message_id": reply_msg.id,
+                "text": _build_start_html(first_name),
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps(_start_markup_dict())
+            })
+        except Exception:
+            pass
+    asyncio.create_task(asyncio.to_thread(_upgrade))
 
 
 @Client.on_message(filters.command("stop") & filters.private)
@@ -201,24 +199,22 @@ async def stop_handler(client: Client, message: Message):
 async def help_handler(client: Client, message: Message):
     await auto_clean_chat(client, message)
     
-    # Try Telegram Bot API directly for blockquotes (non-blocking via thread)
-    try:
-        result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
-            "chat_id": message.chat.id,
-            "text": _build_help_html(),
-            "parse_mode": "HTML",
-            "reply_to_message_id": message.id,
-        })
-        if result.get("ok"):
-            sent_id = result["result"]["message_id"]
-            protect_message(message.chat.id, sent_id)
-            return
-    except Exception as e:
-        print(f"Bot API blockquote help send failed: {e}")
-
-    # Fallback
+    # Send instantly via Pyrogram
     reply_msg = await message.reply_text(_build_help_plain())
     protect_message(message.chat.id, reply_msg.id)
+
+    # Upgrade blockquotes in background
+    def _upgrade():
+        try:
+            _bot_api_call("editMessageText", {
+                "chat_id": message.chat.id,
+                "message_id": reply_msg.id,
+                "text": _build_help_html(),
+                "parse_mode": "HTML"
+            })
+        except Exception:
+            pass
+    asyncio.create_task(asyncio.to_thread(_upgrade))
 
 @Client.on_message(filters.command("id"))
 async def id_handler(client: Client, message: Message):
@@ -292,25 +288,23 @@ async def commands_handler(client: Client, message: Message):
     }
     buttons = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_data")]])
     
-    # Try Telegram Bot API directly for blockquotes (non-blocking via thread)
-    try:
-        result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
-            "chat_id": message.chat.id,
-            "text": _build_commands_html(),
-            "parse_mode": "HTML",
-            "reply_markup": json.dumps(markup_dict),
-            "reply_to_message_id": message.id,
-        })
-        if result.get("ok"):
-            sent_id = result["result"]["message_id"]
-            protect_message(message.chat.id, sent_id)
-            return
-    except Exception as e:
-        print(f"Bot API blockquote commands send failed: {e}")
-
-    # Fallback
+    # Send instantly via Pyrogram
     reply_msg = await message.reply_text(_build_commands_plain(), reply_markup=buttons)
     protect_message(message.chat.id, reply_msg.id)
+
+    # Upgrade UI in background
+    def _upgrade():
+        try:
+            _bot_api_call("editMessageText", {
+                "chat_id": message.chat.id,
+                "message_id": reply_msg.id,
+                "text": _build_commands_html(),
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps(markup_dict)
+            })
+        except Exception:
+            pass
+    asyncio.create_task(asyncio.to_thread(_upgrade))
 
 @Client.on_message(filters.command("referral") & filters.private)
 async def referral_handler(client: Client, message: Message):
@@ -352,6 +346,12 @@ async def premium_info_handler(client: Client, message: Message):
 @Client.on_callback_query(filters.regex("^(open_help|open_about)$"))
 async def start_callbacks(client: Client, query: CallbackQuery):
     data = query.data
+    # Answer immediately to stop loading spinner
+    try:
+        await query.answer()
+    except Exception:
+        pass
+        
     try:
         if data == "open_help":
             markup_dict = {
@@ -361,22 +361,25 @@ async def start_callbacks(client: Client, query: CallbackQuery):
             }
             buttons = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_data"), InlineKeyboardButton("🔙 Back", callback_data="back_to_start")]])
             
-            try:
-                await asyncio.to_thread(_bot_api_call, "editMessageText", {
-                    "chat_id": query.message.chat.id,
-                    "message_id": query.message.id,
-                    "text": _build_help_html(),
-                    "parse_mode": "HTML",
-                    "reply_markup": json.dumps(markup_dict),
-                })
-                return
-            except Exception:
-                pass
-            
+            # Edit instantly with Pyrogram
             try:
                 await query.message.edit_text(_build_help_plain(), reply_markup=buttons)
             except MessageNotModified:
                 pass
+                
+            # Upgrade UI in background
+            def _upgrade():
+                try:
+                    _bot_api_call("editMessageText", {
+                        "chat_id": query.message.chat.id,
+                        "message_id": query.message.id,
+                        "text": _build_help_html(),
+                        "parse_mode": "HTML",
+                        "reply_markup": json.dumps(markup_dict),
+                    })
+                except Exception:
+                    pass
+            asyncio.create_task(asyncio.to_thread(_upgrade))
         elif data == "open_about":
             about_text = (
                 "ℹ️ **About Save Restricted Content Bot**\n\n"
@@ -393,27 +396,34 @@ async def start_callbacks(client: Client, query: CallbackQuery):
 @Client.on_callback_query(filters.regex("^back_to_start$"))
 async def back_to_start(client: Client, query: CallbackQuery):
     first_name = query.from_user.first_name
-
-    # Try Bot API for blockquotes (non-blocking via thread)
+    
+    # Answer immediately to stop loading spinner
     try:
-        await asyncio.to_thread(_bot_api_call, "editMessageText", {
-            "chat_id": query.message.chat.id,
-            "message_id": query.message.id,
-            "text": _build_start_html(first_name),
-            "parse_mode": "HTML",
-            "reply_markup": json.dumps(_start_markup_dict()),
-        })
-        return
-    except Exception as e:
-        print(f"Bot API edit failed: {e}")
+        await query.answer()
+    except Exception:
+        pass
 
-    # Fallback: Pyrogram without blockquotes
+    # Edit instantly with Pyrogram
     try:
         await query.message.edit_text(
             _build_start_plain(first_name), reply_markup=_start_buttons()
         )
     except MessageNotModified:
         pass
+
+    # Upgrade UI in background
+    def _upgrade():
+        try:
+            _bot_api_call("editMessageText", {
+                "chat_id": query.message.chat.id,
+                "message_id": query.message.id,
+                "text": _build_start_html(first_name),
+                "parse_mode": "HTML",
+                "reply_markup": json.dumps(_start_markup_dict()),
+            })
+        except Exception:
+            pass
+    asyncio.create_task(asyncio.to_thread(_upgrade))
 
 
 @Client.on_callback_query(filters.regex("^close_data$"))
