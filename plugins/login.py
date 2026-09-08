@@ -178,6 +178,9 @@ async def login_step_listener(client: Client, message: Message):
 
     if step == "PHONE":
         phone_number = message.text.strip().replace(" ", "")
+        
+        wait_msg = await message.reply_text("⏳ **Sending OTP...**")
+        
         temp_client = Client(f"temp_{user_id}", api_id=API_ID, api_hash=API_HASH, in_memory=True)
         try:
             await temp_client.connect()
@@ -188,6 +191,10 @@ async def login_step_listener(client: Client, message: Message):
                 "code_hash": code_hash.phone_code_hash,
                 "temp_client": temp_client
             }
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
             await message.reply_text(
                 "📩 **OTP Sent!**\n\n"
                 "Please enter the OTP code sent to your Telegram app.\n"
@@ -196,6 +203,10 @@ async def login_step_listener(client: Client, message: Message):
         except Exception as e:
             await temp_client.disconnect()
             del LOGIN_STATES[user_id]
+            try:
+                await wait_msg.delete()
+            except Exception:
+                pass
             await message.reply_text(f"❌ **Login Error:** `{e}`\nPlease start again using `/login`.")
 
     elif step == "OTP":
