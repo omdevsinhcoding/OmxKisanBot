@@ -97,34 +97,57 @@ async def force_resolve_peer(client: Client, chat_id):
 def parse_tg_link(link: str):
     """
     Parses Telegram message link.
+    Handles: single, range, and topic/forum links.
+    Topic format: t.me/c/{channel_id}/{topic_id}/{msg_id}
     """
     link = link.strip()
-    pattern_private_range = r"t\.me/c/(\d+)/(\d+)-(\d+)"
-    pattern_private_single = r"t\.me/c/(\d+)/(\d+)"
-    pattern_public_range = r"t\.me/([a-zA-Z0-9_]+)/(\d+)-(\d+)"
-    pattern_public_single = r"t\.me/([a-zA-Z0-9_]+)/(\d+)"
-    
-    match_priv_range = re.search(pattern_private_range, link)
+
+    # ── Private topic link: t.me/c/CHANNEL/TOPIC/MSG or t.me/c/CHANNEL/TOPIC/START-END ──
+    match_priv_topic_range = re.search(r"t\.me/c/(\d+)/(\d+)/(\d+)-(\d+)", link)
+    if match_priv_topic_range:
+        chat_id = int(f"-100{match_priv_topic_range.group(1)}")
+        start_id = int(match_priv_topic_range.group(3))
+        end_id = int(match_priv_topic_range.group(4))
+        return chat_id, start_id, end_id, True
+
+    match_priv_topic_single = re.search(r"t\.me/c/(\d+)/(\d+)/(\d+)$", link)
+    if match_priv_topic_single:
+        chat_id = int(f"-100{match_priv_topic_single.group(1)}")
+        msg_id = int(match_priv_topic_single.group(3))  # 3rd group = actual msg ID
+        return chat_id, msg_id, msg_id, True
+
+    # ── Private range: t.me/c/CHANNEL/START-END ──
+    match_priv_range = re.search(r"t\.me/c/(\d+)/(\d+)-(\d+)", link)
     if match_priv_range:
         chat_id = int(f"-100{match_priv_range.group(1)}")
         start_id = int(match_priv_range.group(2))
         end_id = int(match_priv_range.group(3))
         return chat_id, start_id, end_id, True
 
-    match_priv_single = re.search(pattern_private_single, link)
+    # ── Private single: t.me/c/CHANNEL/MSG ──
+    match_priv_single = re.search(r"t\.me/c/(\d+)/(\d+)", link)
     if match_priv_single:
         chat_id = int(f"-100{match_priv_single.group(1)}")
         msg_id = int(match_priv_single.group(2))
         return chat_id, msg_id, msg_id, True
 
-    match_pub_range = re.search(pattern_public_range, link)
+    # ── Public topic link: t.me/USERNAME/TOPIC/MSG ──
+    match_pub_topic_single = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)/(\d+)$", link)
+    if match_pub_topic_single:
+        chat_id = match_pub_topic_single.group(1)
+        msg_id = int(match_pub_topic_single.group(3))  # 3rd group = actual msg ID
+        return chat_id, msg_id, msg_id, False
+
+    # ── Public range: t.me/USERNAME/START-END ──
+    match_pub_range = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)-(\d+)", link)
     if match_pub_range:
         chat_id = match_pub_range.group(1)
         start_id = int(match_pub_range.group(2))
         end_id = int(match_pub_range.group(3))
         return chat_id, start_id, end_id, False
 
-    match_pub_single = re.search(pattern_public_single, link)
+    # ── Public single: t.me/USERNAME/MSG ──
+    match_pub_single = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)", link)
     if match_pub_single:
         chat_id = match_pub_single.group(1)
         msg_id = int(match_pub_single.group(2))
@@ -166,8 +189,9 @@ async def get_user_client(user_id: int, api_id: int, api_hash: str):
                 api_id=api_id,
                 api_hash=api_hash,
                 session_string=session_str,
-                in_memory=True,
-                no_updates=True  # ← KILLS the SQLite crash — no background update handler
+                in_memory=True
+                # no_updates removed — it was blocking peer resolution for channels
+                # SQLite crash is already fixed by client caching (no more stop/start per request)
             )
             await user_client.start()
 
@@ -199,9 +223,16 @@ async def stop_user_client(user_id: int):
 
 async def fetch_message_with_retry(client: Client, chat_id, msg_id, retries=3, timeout=30):
     """
-    Fetch a message with retry + timeout. No more hanging forever.
+    Fetch a message with retry + timeout. Resolves peer first.
     """
     last_err = None
+
+    # Resolve peer before fetching — critical for private channels
+    try:
+        await force_resolve_peer(client, chat_id)
+    except Exception as e:
+        print(f"Peer resolve warning for {chat_id}: {e}")
+
     for attempt in range(retries):
         try:
             msg = await asyncio.wait_for(
@@ -215,8 +246,15 @@ async def fetch_message_with_retry(client: Client, chat_id, msg_id, retries=3, t
             await asyncio.sleep(2)
         except Exception as e:
             last_err = str(e)
-            # If client disconnected, try to reconnect
-            if "closed" in str(e).lower() or "disconnect" in str(e).lower():
+            if "peer" in str(e).lower():
+                # Peer not resolved — try harder
+                print(f"[Retry {attempt+1}/{retries}] Peer error for {chat_id}, resolving...")
+                try:
+                    await force_resolve_peer(client, chat_id)
+                except Exception:
+                    pass
+                await asyncio.sleep(2)
+            elif "closed" in str(e).lower() or "disconnect" in str(e).lower():
                 print(f"[Retry {attempt+1}/{retries}] Client disconnected, reconnecting...")
                 try:
                     if not client.is_connected:
