@@ -52,7 +52,7 @@ async def login_handler(client: Client, message: Message):
 
     markup_dict = {
         "inline_keyboard": [
-            [{"text": "📱 Login by Phone No.", "callback_data": "start_login_flow"}],
+            [{"text": "📱 Login by Phone No.", "callback_data": "start_login_flow", "style": "primary"}],
             [{"text": "❌ Cancel", "callback_data": "close_data", "style": "danger"}]
         ]
     }
