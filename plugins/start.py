@@ -247,36 +247,70 @@ async def id_handler(client: Client, message: Message):
 
     await message.reply_text(text)
 
+def _build_commands_html() -> str:
+    return (
+        "📜 <b>Available Commands</b>\n\n"
+        "<blockquote><b>User Commands:</b>\n"
+        "/start - Start the bot\n"
+        "/help - How to use guide\n"
+        "/commands - View all commands\n"
+        "/id - View user ID, chat ID\n"
+        "/login - Login account\n"
+        "/logout - Logout account\n"
+        "/cancel - Cancel ongoing process\n"
+        "/settings - Bot settings (Caption, Rename, Upload, Thumbnail)\n"
+        "/referral - Referral program\n"
+        "/myplan - Check plan status\n"
+        "/premium - Buy premium</blockquote>"
+    )
+
+def _build_commands_plain() -> str:
+    return (
+        "📜 **Available Commands**\n\n"
+        "**User Commands:**\n"
+        "/start - Start the bot\n"
+        "/help - How to use guide\n"
+        "/commands - View all commands\n"
+        "/id - View user ID, chat ID\n"
+        "/login - Login account\n"
+        "/logout - Logout account\n"
+        "/cancel - Cancel ongoing process\n"
+        "/settings - Bot settings (Caption, Rename, Upload, Thumbnail)\n"
+        "/referral - Referral program\n"
+        "/myplan - Check plan status\n"
+        "/premium - Buy premium"
+    )
+
 @Client.on_message(filters.command("commands") & filters.private)
 async def commands_handler(client: Client, message: Message):
     await auto_clean_chat(client, message)
-    text = (
-        "📋 **All Bot Commands List**\n\n"
-        "/start - Start the bot\n"
-        "/stop - Stop active bot processes\n"
-        "/help - How to use guide\n"
-        "/login - Login Telegram account via OTP\n"
-        "/logout - Logout saved session\n"
-        "/check - Check active session status\n"
-        "/batch - Batch / bulk range extraction\n"
-        "/cancel - Cancel ongoing batch process\n"
-        "/dl - Video downloader (YouTube/Insta/TikTok)\n"
-        "/adl - Audio MP3 downloader\n"
-        "/settings - Bot settings (Caption, Rename, Upload, Thumbnail)\n"
-        "/id - View user ID, chat ID\n"
-        "/commands - View all commands\n"
-        "/referral - Referral program\n"
-        "/myplan - Check your plan\n"
-        "/premium - Buy premium\n\n"
-        "📌 **How To Save Content**\n\n"
-        "• **Single Post:** Send any Telegram post link\n"
-        "• **Batch / Bulk:** Send range link like `https://t.me/c/123/10-20` or `/batch`\n"
-        "• **Upload Chat:** Set via `/settings` → Set Upload\n"
-        "• **Custom Caption:** `/settings` → Set Caption\n"
-        "• **Rename Rules:** `/settings` → Set Rename (delete/replace words)\n\n"
-        "🤖 **Bot Content Extraction** (💎 **Unlimited Access**)"
-    )
-    await message.reply_text(text)
+    
+    markup_dict = {
+        "inline_keyboard": [
+            [{"text": "❌ Close", "callback_data": "close_data"}]
+        ]
+    }
+    buttons = InlineKeyboardMarkup([[InlineKeyboardButton("❌ Close", callback_data="close_data")]])
+    
+    # Try Telegram Bot API directly for blockquotes (non-blocking via thread)
+    try:
+        result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
+            "chat_id": message.chat.id,
+            "text": _build_commands_html(),
+            "parse_mode": "HTML",
+            "reply_markup": json.dumps(markup_dict),
+            "reply_to_message_id": message.id,
+        })
+        if result.get("ok"):
+            sent_id = result["result"]["message_id"]
+            protect_message(message.chat.id, sent_id)
+            return
+    except Exception as e:
+        print(f"Bot API blockquote commands send failed: {e}")
+
+    # Fallback
+    reply_msg = await message.reply_text(_build_commands_plain(), reply_markup=buttons)
+    protect_message(message.chat.id, reply_msg.id)
 
 @Client.on_message(filters.command("referral") & filters.private)
 async def referral_handler(client: Client, message: Message):
