@@ -303,11 +303,173 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             print(f"Download+upload failed: {e}")
 
     # ══════════════════════════════════════════════════════════════
-    # STRATEGY 3: Text/non-downloadable message via Bot API
+    # STRATEGY 2.5: Non-downloadable types via Bot API (location, contact, sticker, etc.)
+    #   When topic is set, use Bot API methods with message_thread_id
+    # ══════════════════════════════════════════════════════════════
+    if not sent_ok and thread_id:
+        try:
+            # Location
+            if source_msg.location and not source_msg.venue:
+                result = await asyncio.to_thread(_bot_api_call, "sendLocation", {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "latitude": source_msg.location.latitude,
+                    "longitude": source_msg.location.longitude,
+                })
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Venue
+            elif source_msg.venue:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "latitude": source_msg.venue.location.latitude,
+                    "longitude": source_msg.venue.location.longitude,
+                    "title": source_msg.venue.title,
+                    "address": source_msg.venue.address,
+                }
+                if source_msg.venue.foursquare_id:
+                    payload["foursquare_id"] = source_msg.venue.foursquare_id
+                result = await asyncio.to_thread(_bot_api_call, "sendVenue", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Contact
+            elif source_msg.contact:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "phone_number": source_msg.contact.phone_number,
+                    "first_name": source_msg.contact.first_name or "",
+                }
+                if source_msg.contact.last_name:
+                    payload["last_name"] = source_msg.contact.last_name
+                result = await asyncio.to_thread(_bot_api_call, "sendContact", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Sticker (use file_id, no need to download)
+            elif source_msg.sticker:
+                result = await asyncio.to_thread(_bot_api_call, "sendSticker", {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "sticker": source_msg.sticker.file_id,
+                })
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Dice
+            elif source_msg.dice:
+                result = await asyncio.to_thread(_bot_api_call, "sendDice", {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "emoji": source_msg.dice.emoji,
+                })
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Poll
+            elif source_msg.poll:
+                # Polls can't be easily re-sent, try forwarding
+                pass
+
+            # Animation/GIF (use file_id)
+            elif source_msg.animation:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "animation": source_msg.animation.file_id,
+                }
+                if final_caption:
+                    payload["caption"] = final_caption
+                result = await asyncio.to_thread(_bot_api_call, "sendAnimation", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Photo (use file_id)
+            elif source_msg.photo:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "photo": source_msg.photo.file_id,
+                }
+                if final_caption:
+                    payload["caption"] = final_caption
+                result = await asyncio.to_thread(_bot_api_call, "sendPhoto", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Video (use file_id)
+            elif source_msg.video:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "video": source_msg.video.file_id,
+                }
+                if final_caption:
+                    payload["caption"] = final_caption
+                result = await asyncio.to_thread(_bot_api_call, "sendVideo", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Document (use file_id)
+            elif source_msg.document:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "document": source_msg.document.file_id,
+                }
+                if final_caption:
+                    payload["caption"] = final_caption
+                result = await asyncio.to_thread(_bot_api_call, "sendDocument", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Audio (use file_id)
+            elif source_msg.audio:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "audio": source_msg.audio.file_id,
+                }
+                if final_caption:
+                    payload["caption"] = final_caption
+                result = await asyncio.to_thread(_bot_api_call, "sendAudio", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Voice (use file_id)
+            elif source_msg.voice:
+                payload = {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "voice": source_msg.voice.file_id,
+                }
+                if final_caption:
+                    payload["caption"] = final_caption
+                result = await asyncio.to_thread(_bot_api_call, "sendVoice", payload)
+                if result.get("ok"):
+                    sent_ok = True
+
+            # Video Note (use file_id)
+            elif source_msg.video_note:
+                result = await asyncio.to_thread(_bot_api_call, "sendVideoNote", {
+                    "chat_id": dest_chat,
+                    "message_thread_id": thread_id,
+                    "video_note": source_msg.video_note.file_id,
+                })
+                if result.get("ok"):
+                    sent_ok = True
+
+        except Exception as e:
+            print(f"Bot API special type send failed: {e}")
+
+    # ══════════════════════════════════════════════════════════════
+    # STRATEGY 3: Text message
     # ══════════════════════════════════════════════════════════════
     if not sent_ok and (source_msg.text or final_caption):
         if thread_id:
-            # Use Bot API sendMessage with message_thread_id
             try:
                 result = await asyncio.to_thread(_bot_api_call, "sendMessage", {
                     "chat_id": dest_chat,
@@ -330,10 +492,9 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     print(f"Pyrogram send_message failed ({type(c).__name__}): {e}")
 
     # ══════════════════════════════════════════════════════════════
-    # STRATEGY 4: Bot API forwardMessage (last resort for non-downloadable)
+    # STRATEGY 4: Last resort — copy without topic (at least content is saved)
     # ══════════════════════════════════════════════════════════════
     if not sent_ok:
-        # Try user_client copy without topic (at least saves the content)
         for c in clients_to_try:
             try:
                 await force_resolve_peer(c, dest_chat)
