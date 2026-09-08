@@ -36,22 +36,30 @@ async def login_handler(client: Client, message: Message):
         [InlineKeyboardButton("❌ Cancel", callback_data="close_data")]
     ])
     
-    text = (
+    # Plain text for instant Pyrogram send (no blockquotes to avoid ugly `> ` literals)
+    plain_text = (
         "🔐 **Telegram Account Login**\n\n"
-        "> ⚠️ **Warning:** _Do not misuse or abuse your account._\n"
-        "> _If Telegram bans or restricts your account, the responsibility is entirely yours._\n\n"
+        "⚠️ **Warning:** _Do not misuse or abuse your account._\n"
+        "_If Telegram bans or restricts your account, the responsibility is entirely yours._\n\n"
         "_Tap Login by Phone No. to begin._"
     )
     
     # Send instantly to prevent any lag
-    reply_msg = await message.reply_text(text, reply_markup=buttons)
+    reply_msg = await message.reply_text(plain_text, reply_markup=buttons)
     protect_message(message.chat.id, reply_msg.id)
 
-    # Upgrade button styles (Blue/Red) in the background via Bot API
+    # Upgrade text (add blockquote) and button styles (Blue/Red) in the background via Bot API
     import json
     import asyncio
     import urllib.request
     from config import BOT_TOKEN
+
+    html_text = (
+        "🔐 <b>Telegram Account Login</b>\n\n"
+        "<blockquote>⚠️ <b>Warning:</b> <i>Do not misuse or abuse your account.\n"
+        "If Telegram bans or restricts your account, the responsibility is entirely yours.</i></blockquote>\n\n"
+        "<i>Tap Login by Phone No. to begin.</i>"
+    )
 
     markup_dict = {
         "inline_keyboard": [
@@ -61,10 +69,12 @@ async def login_handler(client: Client, message: Message):
     }
     
     def _upgrade_ui():
-        url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageReplyMarkup"
+        url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
         payload = {
             "chat_id": message.chat.id,
             "message_id": reply_msg.id,
+            "text": html_text,
+            "parse_mode": "HTML",
             "reply_markup": json.dumps(markup_dict)
         }
         try:
