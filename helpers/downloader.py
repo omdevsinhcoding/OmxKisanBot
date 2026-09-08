@@ -9,6 +9,12 @@ from helpers.progress import ProgressTracker
 from database.db import get_session, get_thumbnail, get_caption, get_replacements, get_user_settings
 from config import BOT_TOKEN
 
+# ══════════════════════════════════════════════════════════════
+# CACHED USER CLIENTS — stay alive, no more create/destroy spam
+# ══════════════════════════════════════════════════════════════
+_user_clients = {}  # {user_id: Client}
+_client_locks = {}  # {user_id: asyncio.Lock}
+
 
 def _bot_api_call(method: str, payload: dict) -> dict:
     """Call Telegram Bot API directly via urllib."""
@@ -126,30 +132,104 @@ def parse_tg_link(link: str):
 
     return None, None, None, False
 
+
 async def get_user_client(user_id: int, api_id: int, api_hash: str):
-    session_str = await get_session(user_id)
-    if not session_str:
-        return None
-    try:
-        user_client = Client(
-            f"user_{user_id}",
-            api_id=api_id,
-            api_hash=api_hash,
-            session_string=session_str,
-            in_memory=True
-        )
-        await user_client.start()
-        
+    """
+    Get or create a cached user client. Client stays alive across requests.
+    No more create/destroy per message — fixes SQLite closed DB crash.
+    """
+    # Per-user lock to prevent double-start
+    if user_id not in _client_locks:
+        _client_locks[user_id] = asyncio.Lock()
+
+    async with _client_locks[user_id]:
+        # Return cached client if alive
+        if user_id in _user_clients:
+            uc = _user_clients[user_id]
+            if uc.is_connected:
+                return uc
+            else:
+                # Dead client — remove and recreate
+                try:
+                    await uc.stop()
+                except Exception:
+                    pass
+                del _user_clients[user_id]
+
+        session_str = await get_session(user_id)
+        if not session_str:
+            return None
+
         try:
-            async for _ in user_client.get_dialogs(limit=100):
-                pass
+            user_client = Client(
+                f"user_{user_id}",
+                api_id=api_id,
+                api_hash=api_hash,
+                session_string=session_str,
+                in_memory=True,
+                no_updates=True  # ← KILLS the SQLite crash — no background update handler
+            )
+            await user_client.start()
+
+            try:
+                async for _ in user_client.get_dialogs(limit=100):
+                    pass
+            except Exception as e:
+                print(f"Error populating dialogs for {user_id}: {e}")
+
+            _user_clients[user_id] = user_client
+            return user_client
         except Exception as e:
-            print(f"Error populating dialogs for {user_id}: {e}")
-            
-        return user_client
-    except Exception as e:
-        print(f"Error starting user client for {user_id}: {e}")
-        return None
+            print(f"Error starting user client for {user_id}: {e}")
+            return None
+
+
+async def stop_user_client(user_id: int):
+    """
+    Explicitly stop and remove a cached user client.
+    Only call on /logout or session invalidation.
+    """
+    if user_id in _user_clients:
+        try:
+            await _user_clients[user_id].stop()
+        except Exception:
+            pass
+        del _user_clients[user_id]
+
+
+async def fetch_message_with_retry(client: Client, chat_id, msg_id, retries=3, timeout=30):
+    """
+    Fetch a message with retry + timeout. No more hanging forever.
+    """
+    last_err = None
+    for attempt in range(retries):
+        try:
+            msg = await asyncio.wait_for(
+                client.get_messages(chat_id, msg_id),
+                timeout=timeout
+            )
+            return msg
+        except asyncio.TimeoutError:
+            last_err = "Connection timed out while fetching message"
+            print(f"[Retry {attempt+1}/{retries}] Timeout fetching msg {msg_id} from {chat_id}")
+            await asyncio.sleep(2)
+        except Exception as e:
+            last_err = str(e)
+            # If client disconnected, try to reconnect
+            if "closed" in str(e).lower() or "disconnect" in str(e).lower():
+                print(f"[Retry {attempt+1}/{retries}] Client disconnected, reconnecting...")
+                try:
+                    if not client.is_connected:
+                        await client.start()
+                except Exception:
+                    pass
+                await asyncio.sleep(2)
+            else:
+                print(f"[Retry {attempt+1}/{retries}] Error fetching msg {msg_id}: {e}")
+                await asyncio.sleep(1)
+    
+    print(f"All {retries} retries failed for msg {msg_id}: {last_err}")
+    return None
 
 
 async def process_and_send_message(bot: Client, user_id: int, source_msg: Message, target_chat_id: int, status_msg: Message, user_client: Client = None):
@@ -183,7 +263,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         original_caption = original_caption.replace(old_word, new_word)
     final_caption = custom_caption_template.replace("{caption}", original_caption) if custom_caption_template else original_caption
 
-    # Get or create user_client
+    # Get or create user_client (cached — no new client created if already exists)
     local_user_client = user_client
     created_local = False
     if not local_user_client:
@@ -508,9 +588,4 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
     if not sent_ok:
         raise Exception(f"All strategies failed for dest={dest_chat}")
 
-    # Cleanup
-    if created_local and local_user_client:
-        try:
-            await local_user_client.stop()
-        except Exception:
-            pass
+    # NOTE: No cleanup here — cached clients stay alive

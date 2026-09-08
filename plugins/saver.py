@@ -1,6 +1,6 @@
 from pyrogram import Client, filters, ContinuePropagation, enums
 from pyrogram.types import Message, CallbackQuery
-from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message
+from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message, fetch_message_with_retry
 from helpers.cleaner import auto_clean_chat
 from helpers.progress import handle_refresh_callback
 from config import API_ID, API_HASH
@@ -36,13 +36,24 @@ async def single_post_saver(client: Client, message: Message):
         if start_id == end_id:
             # Single Post
             source_msg = None
-            try:
-                source_msg = await fetch_client.get_messages(chat_id, start_id)
-            except Exception:
-                if not is_private and not user_client:
-                    user_client = await get_user_client(user_id, API_ID, API_HASH)
-                    if user_client:
-                        source_msg = await user_client.get_messages(chat_id, start_id)
+            if is_private:
+                # Private channel — use retry logic
+                source_msg = await fetch_message_with_retry(fetch_client, chat_id, start_id)
+            else:
+                # Public channel — direct fetch (original behavior)
+                try:
+                    source_msg = await fetch_client.get_messages(chat_id, start_id)
+                except Exception:
+                    pass
+                # Fallback: if bot failed on public, try user client
+                if not source_msg or source_msg.empty:
+                    uc = await get_user_client(user_id, API_ID, API_HASH)
+                    if uc:
+                        user_client = uc
+                        try:
+                            source_msg = await uc.get_messages(chat_id, start_id)
+                        except Exception:
+                            pass
 
             if not source_msg or source_msg.empty:
                 return await status.edit_text("❌ **Could not fetch message!** Make sure link is correct and bot/user has access.")
@@ -76,7 +87,10 @@ async def single_post_saver(client: Client, message: Message):
             for current_id in range(start_id, end_id + 1):
                 sub_status = None
                 try:
-                    source_msg = await fetch_client.get_messages(chat_id, current_id)
+                    if is_private:
+                        source_msg = await fetch_message_with_retry(fetch_client, chat_id, current_id)
+                    else:
+                        source_msg = await fetch_client.get_messages(chat_id, current_id)
                     if not source_msg or source_msg.empty or source_msg.service:
                         skipped_count += 1
                         continue
@@ -137,7 +151,4 @@ async def single_post_saver(client: Client, message: Message):
 
     except Exception as e:
         await status.edit_text(f"❌ **Error:** `{e}`")
-    finally:
-        if user_client:
-            await user_client.stop()
-
+    # NOTE: No user_client.stop() here — client is cached and reused

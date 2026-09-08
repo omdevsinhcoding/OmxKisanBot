@@ -5,6 +5,7 @@ from pyrogram.errors import (
     ApiIdInvalid, PhoneNumberInvalid, PhoneCodeInvalid, PhoneCodeExpired, SessionPasswordNeeded, PasswordHashInvalid
 )
 from database.db import save_session, get_session, delete_session
+from helpers.downloader import stop_user_client
 from config import API_ID, API_HASH
 
 from helpers.cleaner import auto_clean_chat, protect_message
@@ -163,6 +164,7 @@ async def check_handler(client: Client, message: Message):
 async def logout_handler(client: Client, message: Message):
     await auto_clean_chat(client, message)
     user_id = message.from_user.id
+    await stop_user_client(user_id)  # Kill cached client first
     await delete_session(user_id)
     if user_id in LOGIN_STATES:
         del LOGIN_STATES[user_id]

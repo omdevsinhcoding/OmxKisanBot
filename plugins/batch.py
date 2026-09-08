@@ -1,6 +1,6 @@
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
-from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message
+from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message, fetch_message_with_retry
 from config import API_ID, API_HASH
 
 from helpers.cleaner import auto_clean_chat
@@ -87,7 +87,10 @@ async def batch_range_command(client: Client, message: Message):
             fetch_client = user_client if is_priv1 else client
             sub_status = None
             try:
-                msg = await fetch_client.get_messages(chat_id1, current_id)
+                if is_priv1:
+                    msg = await fetch_message_with_retry(fetch_client, chat_id1, current_id)
+                else:
+                    msg = await fetch_client.get_messages(chat_id1, current_id)
                 if not msg or msg.empty or msg.service:
                     skipped_count += 1
                     continue
@@ -146,6 +149,4 @@ async def batch_range_command(client: Client, message: Message):
 
     except Exception as e:
         await status.edit_text(f"❌ **Batch Error:** `{e}`")
-    finally:
-        if user_client:
-            await user_client.stop()
+    # NOTE: No user_client.stop() here — client is cached and reused
