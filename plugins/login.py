@@ -12,6 +12,22 @@ from helpers.cleaner import auto_clean_chat, protect_message
 # Active login sessions in-memory step state
 LOGIN_STATES = {}
 
+def _build_login_html() -> str:
+    return (
+        "🔐 <b>Telegram Account Login</b>\n\n"
+        "<blockquote>⚠️ <b>Warning:</b> <i>Do not misuse or abuse your account.\n"
+        "If Telegram bans or restricts your account, the responsibility is entirely yours.</i></blockquote>\n\n"
+        "<i>Tap Login by Phone No. to begin.</i>"
+    )
+
+def _build_login_plain() -> str:
+    return (
+        "🔐 **Telegram Account Login**\n\n"
+        "⚠️ **Warning:** _Do not misuse or abuse your account.\n"
+        "If Telegram bans or restricts your account, the responsibility is entirely yours._\n\n"
+        "_Tap Login by Phone No. to begin._"
+    )
+
 @Client.on_message(filters.command("login") & filters.private)
 async def login_handler(client: Client, message: Message):
     protect_message(message.chat.id, message.id)
@@ -28,12 +44,63 @@ async def login_handler(client: Client, message: Message):
         protect_message(message.chat.id, already_msg.id)
         return
 
+    # Don't set state to PHONE yet, wait for button click.
+    import json
+    import asyncio
+    import urllib.request
+    from config import BOT_TOKEN
+
+    markup_dict = {
+        "inline_keyboard": [
+            [{"text": "📱 Login by Phone No.", "callback_data": "start_login_flow"}],
+            [{"text": "❌ Cancel", "callback_data": "close_data", "style": "danger"}]
+        ]
+    }
+    
+    from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    buttons = InlineKeyboardMarkup([
+        [InlineKeyboardButton("📱 Login by Phone No.", callback_data="start_login_flow")],
+        [InlineKeyboardButton("❌ Cancel", callback_data="close_data")]
+    ])
+
+    url = f"https://api.telegram.org/bot{BOT_TOKEN}/sendMessage"
+    payload = {
+        "chat_id": message.chat.id,
+        "text": _build_login_html(),
+        "parse_mode": "HTML",
+        "reply_markup": json.dumps(markup_dict),
+        "reply_to_message_id": message.id,
+    }
+    
+    try:
+        def _send():
+            req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                return json.loads(resp.read().decode("utf-8"))
+        result = await asyncio.to_thread(_send)
+        if result.get("ok"):
+            protect_message(message.chat.id, result["result"]["message_id"])
+            return
+    except Exception as e:
+        print(f"Bot API login send failed: {e}")
+
+    # Fallback
+    reply_msg = await message.reply_text(_build_login_plain(), reply_markup=buttons)
+    protect_message(message.chat.id, reply_msg.id)
+
+@Client.on_callback_query(filters.regex("^start_login_flow$"))
+async def start_login_callback(client: Client, query):
+    user_id = query.from_user.id
     LOGIN_STATES[user_id] = {"step": "PHONE"}
-    await message.reply_text(
-        "📱 **Telegram Account Login**\n\n"
-        "Please send your phone number registered with Telegram in international format (with country code).\n"
-        "Example: `+919876543210`"
-    )
+    try:
+        await query.message.edit_text(
+            "📱 **Telegram Account Login**\n\n"
+            "Please send your phone number registered with Telegram in international format (with country code).\n"
+            "Example: `+919876543210`",
+            reply_markup=None
+        )
+    except Exception:
+        pass
 
 @Client.on_message(filters.command("check") & filters.private)
 async def check_handler(client: Client, message: Message):
