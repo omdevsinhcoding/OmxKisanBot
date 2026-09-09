@@ -36,10 +36,39 @@ async def single_post_saver(client: Client, message: Message):
         if start_id == end_id:
             # Single Post
             source_msg = None
+
+            if is_private and fetch_client:
+                # Refresh dialogs so cached client knows about this channel
+                try:
+                    async for _ in fetch_client.get_dialogs(limit=200):
+                        pass
+                except Exception:
+                    pass
+
             try:
                 source_msg = await fetch_client.get_messages(chat_id, start_id)
             except Exception as e:
                 print(f"[FETCH] get_messages failed: {e}")
+
+            # If private channel returned empty media, the cached client is stale
+            # Create a FRESH client (like Kisan does) and retry
+            if is_private and source_msg and not source_msg.empty and not source_msg.media and not source_msg.text:
+                print(f"[FETCH] Cached client returned empty content, creating fresh client...")
+                from helpers.downloader import stop_user_client
+                await stop_user_client(user_id)
+                user_client = await get_user_client(user_id, API_ID, API_HASH)
+                if user_client:
+                    fetch_client = user_client
+                    try:
+                        async for _ in user_client.get_dialogs(limit=200):
+                            pass
+                    except Exception:
+                        pass
+                    try:
+                        source_msg = await user_client.get_messages(chat_id, start_id)
+                    except Exception as e:
+                        print(f"[FETCH] Fresh client also failed: {e}")
+
             # Fallback: if bot failed, try user client
             if (not source_msg or source_msg.empty) and not is_private:
                 uc = await get_user_client(user_id, API_ID, API_HASH)
