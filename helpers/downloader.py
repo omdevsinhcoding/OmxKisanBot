@@ -196,34 +196,26 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
     if user_thumb and not os.path.exists(user_thumb):
         user_thumb = None
 
-    # Resolve destination peer for bot before any upload attempt
-    try:
-        await bot.resolve_peer(dest_chat)
-    except Exception:
-        # Bot might not know this chat yet — try getting dialogs
-        try:
-            async for _ in bot.get_dialogs(limit=100):
+    # Quick peer resolution (non-blocking, don't use get_dialogs — it's slow)
+    for c in [bot, local_user_client]:
+        if c:
+            try:
+                await c.resolve_peer(dest_chat)
+            except Exception:
                 pass
-            await bot.resolve_peer(dest_chat)
-        except Exception as e:
-            print(f"Bot could not resolve dest {dest_chat}: {e}")
-
-    # Also resolve for user_client if available
-    if local_user_client:
-        try:
-            await local_user_client.resolve_peer(dest_chat)
-        except Exception:
-            pass
 
     errors = []  # Track all errors for debugging
 
+    print(f"[SEND] user={user_id} dest={dest_chat} topic={thread_id} media={bool(source_msg.media)} text={bool(source_msg.text)}")
+
     # ══════════════════════════════════════════════════════════════
-    # MEDIA MESSAGES: Download via source_msg, Upload via bot
+    # MEDIA MESSAGES: Download via source_msg, Upload via bot/user
     # ══════════════════════════════════════════════════════════════
     if source_msg.media:
         file_path = None
         try:
             os.makedirs("downloads", exist_ok=True)
+            print(f"[SEND] Starting download...")
             # Download from source message (user_client fetched it, so it has access)
             file_path = await source_msg.download(
                 file_name="downloads/",
@@ -234,8 +226,11 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
             print(f"Download failed: {e}")
 
         if file_path and os.path.exists(file_path):
+            fsize = os.path.getsize(file_path)
+            print(f"[SEND] Download OK: {file_path} ({fsize} bytes)")
             try:
                 if thread_id:
+                    print(f"[SEND] Uploading via Bot API to {dest_chat} topic={thread_id}")
                     # ── Topic routing: Upload via Bot API with message_thread_id ──
                     fields = {"chat_id": str(dest_chat), "message_thread_id": str(thread_id)}
                     if final_caption:
