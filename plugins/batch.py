@@ -59,7 +59,6 @@ async def batch_range_command(client: Client, message: Message):
     base_link = f"https://t.me/c/{str(chat_id1)[4:]}" if str(chat_id1).startswith("-100") else f"https://t.me/{chat_id1}"
     processed_link = f"{base_link}/{start_id}-{end_id}"
 
-    # ── Batch Initialized message (pin it) ──
     init_text = (
         f"📦 **Batch Initialized**\n\n"
         f"**Range:** {start_id} → {end_id}\n"
@@ -78,12 +77,6 @@ async def batch_range_command(client: Client, message: Message):
             user_client = await get_user_client(user_id, API_ID, API_HASH)
             if not user_client:
                 return await status.edit_text("🔐 **Private Channel!** Please login using `/login` first.")
-            # Refresh dialogs so cached client has channel access hashes
-            try:
-                async for _ in user_client.get_dialogs(limit=200):
-                    pass
-            except Exception:
-                pass
 
         for current_id in range(start_id, end_id + 1):
             if BATCH_CANCEL_FLAGS.get(user_id, False):
@@ -152,4 +145,6 @@ async def batch_range_command(client: Client, message: Message):
 
     except Exception as e:
         await status.edit_text(f"❌ **Batch Error:** `{e}`")
-    # NOTE: No user_client.stop() here — client is cached and reused
+    finally:
+        if user_client:
+            await user_client.stop()

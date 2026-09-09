@@ -9,7 +9,7 @@ from config import API_ID, API_HASH
 async def refresh_progress_listener(client: Client, query: CallbackQuery):
     await handle_refresh_callback(client, query)
 
-@Client.on_message(filters.incoming & filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium"]))
+@Client.on_message(filters.incoming & filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium", "check", "cancellogin"]))
 async def single_post_saver(client: Client, message: Message):
     await auto_clean_chat(client, message)
     user_id = message.from_user.id
@@ -36,64 +36,21 @@ async def single_post_saver(client: Client, message: Message):
         if start_id == end_id:
             # Single Post
             source_msg = None
-
-            if is_private and fetch_client:
-                # Refresh dialogs so cached client knows about this channel
-                try:
-                    async for _ in fetch_client.get_dialogs(limit=200):
-                        pass
-                except Exception:
-                    pass
-
             try:
                 source_msg = await fetch_client.get_messages(chat_id, start_id)
-            except Exception as e:
-                print(f"[FETCH] get_messages failed: {e}")
-
-            # If private channel returned empty media, the cached client is stale
-            # Create a FRESH client (like Kisan does) and retry
-            if is_private and source_msg and not source_msg.empty and not source_msg.media and not source_msg.text:
-                print(f"[FETCH] Cached client returned empty content, creating fresh client...")
-                from helpers.downloader import stop_user_client
-                await stop_user_client(user_id)
-                user_client = await get_user_client(user_id, API_ID, API_HASH)
-                if user_client:
-                    fetch_client = user_client
-                    try:
-                        async for _ in user_client.get_dialogs(limit=200):
-                            pass
-                    except Exception:
-                        pass
-                    try:
+            except Exception:
+                if not is_private and not user_client:
+                    user_client = await get_user_client(user_id, API_ID, API_HASH)
+                    if user_client:
                         source_msg = await user_client.get_messages(chat_id, start_id)
-                    except Exception as e:
-                        print(f"[FETCH] Fresh client also failed: {e}")
-
-            # Fallback: if bot failed, try user client
-            if (not source_msg or source_msg.empty) and not is_private:
-                uc = await get_user_client(user_id, API_ID, API_HASH)
-                if uc:
-                    user_client = uc
-                    try:
-                        source_msg = await uc.get_messages(chat_id, start_id)
-                    except Exception as e:
-                        print(f"[FETCH] user_client fallback failed: {e}")
 
             if not source_msg or source_msg.empty:
                 return await status.edit_text("❌ **Could not fetch message!** Make sure link is correct and bot/user has access.")
 
-            # Diagnostic logging
-            print(f"[FETCH] OK chat={chat_id} msg_id={start_id}")
-            print(f"[FETCH] empty={source_msg.empty} service={source_msg.service} media={source_msg.media}")
-            print(f"[FETCH] video={source_msg.video} photo={source_msg.photo} document={source_msg.document} audio={source_msg.audio}")
-            print(f"[FETCH] sticker={source_msg.sticker} animation={source_msg.animation} voice={source_msg.voice}")
-            print(f"[FETCH] text={bool(source_msg.text)} caption={bool(source_msg.caption)}")
-            if source_msg.video:
-                print(f"[FETCH] video_size={source_msg.video.file_size} video_name={source_msg.video.file_name}")
-
-            await process_and_send_message(client, user_id, source_msg, message.chat.id, status, user_client)
+            await process_and_send_message(client, user_id, source_msg, message.chat.id, status)
             await status.edit_text("✅ **Task Complete!**")
         else:
+            # Range Link
             import time
             start_time = time.time()
             success_count = 0
@@ -103,7 +60,6 @@ async def single_post_saver(client: Client, message: Message):
             total_posts = (end_id - start_id) + 1
             base_link = f"https://t.me/c/{str(chat_id)[4:]}" if str(chat_id).startswith("-100") else f"https://t.me/{chat_id}"
 
-            # ── Batch Initialized message (pin it) ──
             init_text = (
                 f"📦 **Batch Initialized**\n\n"
                 f"**Range:** {start_id} → {end_id}\n"
@@ -125,7 +81,7 @@ async def single_post_saver(client: Client, message: Message):
                         skipped_count += 1
                         continue
                     sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
-                    await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status, user_client)
+                    await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status)
                     success_count += 1
                 except Exception:
                     failed_count += 1
@@ -150,16 +106,10 @@ async def single_post_saver(client: Client, message: Message):
                 f"<b>Skipped:</b> {skipped_count} <i>(deleted/service msgs)</i>\n"
                 f"<b>Failed:</b> {failed_count}"
                 "</blockquote>\n\n"
-                "🔗 <b>𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐞𝐝 𝐋𝐢𝐧𝐤𝐬</b>\n\n"
-                "<blockquote>"
-                f"<b>Processed Link:</b> <code>{base_link}/{start_id}-{end_id}</code>\n"
-                f"<b>Last Processed:</b> <code>{base_link}/{end_id}</code>"
-                "</blockquote>\n\n"
                 f"⏱ <b>𝐓𝐢𝐦𝐞 𝐓𝐚𝐤𝐞𝐧:</b> {elapsed}s"
             )
             try:
-                # Try sending with direct HTML format to support blockquotes
-                import asyncio, urllib.request, json
+                import urllib.request
                 from config import BOT_TOKEN
                 payload = {
                     "chat_id": status.chat.id,
@@ -173,12 +123,13 @@ async def single_post_saver(client: Client, message: Message):
                     req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
                     with urllib.request.urlopen(req, timeout=10) as resp:
                         return json.loads(resp.read().decode("utf-8"))
+                import json
                 await asyncio.to_thread(_do_api)
-            except Exception as e:
-                print(f"Bot API edit failed: {e}")
-                # Fallback to Pyrogram
+            except Exception:
                 await status.edit_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
 
     except Exception as e:
         await status.edit_text(f"❌ **Error:** `{e}`")
-    # NOTE: No user_client.stop() here — client is cached and reused
+    finally:
+        if user_client:
+            await user_client.stop()
