@@ -38,8 +38,8 @@ async def single_post_saver(client: Client, message: Message):
             source_msg = None
             try:
                 source_msg = await fetch_client.get_messages(chat_id, start_id)
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"[FETCH] get_messages failed: {e}")
             # Fallback: if bot failed, try user client
             if (not source_msg or source_msg.empty) and not is_private:
                 uc = await get_user_client(user_id, API_ID, API_HASH)
@@ -47,11 +47,20 @@ async def single_post_saver(client: Client, message: Message):
                     user_client = uc
                     try:
                         source_msg = await uc.get_messages(chat_id, start_id)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        print(f"[FETCH] user_client fallback failed: {e}")
 
             if not source_msg or source_msg.empty:
                 return await status.edit_text("❌ **Could not fetch message!** Make sure link is correct and bot/user has access.")
+
+            # Diagnostic logging
+            print(f"[FETCH] OK chat={chat_id} msg_id={start_id}")
+            print(f"[FETCH] empty={source_msg.empty} service={source_msg.service} media={source_msg.media}")
+            print(f"[FETCH] video={source_msg.video} photo={source_msg.photo} document={source_msg.document} audio={source_msg.audio}")
+            print(f"[FETCH] sticker={source_msg.sticker} animation={source_msg.animation} voice={source_msg.voice}")
+            print(f"[FETCH] text={bool(source_msg.text)} caption={bool(source_msg.caption)}")
+            if source_msg.video:
+                print(f"[FETCH] video_size={source_msg.video.file_size} video_name={source_msg.video.file_name}")
 
             await process_and_send_message(client, user_id, source_msg, message.chat.id, status, user_client)
             await status.edit_text("✅ **Task Complete!**")
