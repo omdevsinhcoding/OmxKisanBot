@@ -1,4 +1,4 @@
-from pyrogram import Client, filters, enums
+from pyrogram import Client, filters
 from pyrogram.types import Message
 from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message
 from config import API_ID, API_HASH
@@ -50,28 +50,6 @@ async def batch_range_command(client: Client, message: Message):
     BATCH_CANCEL_FLAGS[user_id] = False
 
     user_client = None
-    import time
-    start_time = time.time()
-    success_count = 0
-    failed_count = 0
-    skipped_count = 0
-
-    base_link = f"https://t.me/c/{str(chat_id1)[4:]}" if str(chat_id1).startswith("-100") else f"https://t.me/{chat_id1}"
-    processed_link = f"{base_link}/{start_id}-{end_id}"
-
-    init_text = (
-        f"📦 **Batch Initialized**\n\n"
-        f"**Range:** {start_id} → {end_id}\n"
-        f"**Link:** {processed_link}\n\n"
-        f"🔄 **Processing started...**\n"
-        f"🛑 Use /cancel to stop"
-    )
-    await status.edit_text(init_text)
-    try:
-        await status.pin(both_sides=True)
-    except Exception:
-        pass
-
     try:
         if is_priv1:
             user_client = await get_user_client(user_id, API_ID, API_HASH)
@@ -84,64 +62,16 @@ async def batch_range_command(client: Client, message: Message):
                 break
 
             fetch_client = user_client if is_priv1 else client
-            sub_status = None
             try:
                 msg = await fetch_client.get_messages(chat_id1, current_id)
-                if not msg or msg.empty or msg.service:
-                    skipped_count += 1
-                    continue
-                sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
-                await process_and_send_message(client, user_id, msg, message.chat.id, sub_status)
-                success_count += 1
-            except Exception:
-                failed_count += 1
-            finally:
-                if sub_status:
-                    try:
-                        await sub_status.delete()
-                    except Exception:
-                        pass
+                if msg and not msg.empty:
+                    sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
+                    await process_and_send_message(client, user_id, msg, message.chat.id, sub_status)
+                    await sub_status.delete()
+            except Exception as e:
+                print(f"Skipping post {current_id}: {e}")
 
-        elapsed = int(time.time() - start_time)
-        
-        text = (
-            "✅ <b>𝐁𝐚𝐭𝐜𝐡 𝐅𝐢𝐧𝐢𝐬𝐡𝐞𝐝</b>\n\n"
-            "<blockquote>"
-            f"<b>Original Link:</b> <code>{processed_link}</code>\n"
-            f"<b>Range:</b> {start_id} ➔ {end_id}"
-            "</blockquote>\n\n"
-            "📊 <b>𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬</b>\n\n"
-            "<blockquote>"
-            f"<b>Success:</b> {success_count}\n"
-            f"<b>Skipped:</b> {skipped_count} <i>(deleted/service msgs)</i>\n"
-            f"<b>Failed:</b> {failed_count}"
-            "</blockquote>\n\n"
-            "🔗 <b>𝐏𝐫𝐨𝐜𝐞𝐬𝐬𝐞𝐝 𝐋𝐢𝐧𝐤𝐬</b>\n\n"
-            "<blockquote>"
-            f"<b>Processed Link:</b> <code>{processed_link}</code>\n"
-            f"<b>Last Processed:</b> <code>{base_link}/{end_id}</code>"
-            "</blockquote>\n\n"
-            f"⏱ <b>𝐓𝐢𝐦𝐞 𝐓𝐚𝐤𝐞𝐧:</b> {elapsed}s"
-        )
-        try:
-            import asyncio, urllib.request, json
-            from config import BOT_TOKEN
-            payload = {
-                "chat_id": status.chat.id,
-                "message_id": status.id,
-                "text": text,
-                "parse_mode": "HTML",
-                "disable_web_page_preview": True
-            }
-            url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-            def _do_api():
-                req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-                with urllib.request.urlopen(req, timeout=10) as resp:
-                    return json.loads(resp.read().decode("utf-8"))
-            await asyncio.to_thread(_do_api)
-        except Exception as e:
-            print(f"Bot API edit failed: {e}")
-            await status.edit_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+        await status.edit_text("✅ **Batch Completed!**")
 
     except Exception as e:
         await status.edit_text(f"❌ **Batch Error:** `{e}`")

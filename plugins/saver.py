@@ -1,4 +1,4 @@
-from pyrogram import Client, filters, ContinuePropagation, enums
+from pyrogram import Client, filters, ContinuePropagation
 from pyrogram.types import Message, CallbackQuery
 from helpers.downloader import parse_tg_link, get_user_client, process_and_send_message
 from helpers.cleaner import auto_clean_chat
@@ -9,7 +9,7 @@ from config import API_ID, API_HASH
 async def refresh_progress_listener(client: Client, query: CallbackQuery):
     await handle_refresh_callback(client, query)
 
-@Client.on_message(filters.incoming & filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium", "check", "cancellogin"]))
+@Client.on_message(filters.text & filters.private & ~filters.command(["start", "stop", "help", "login", "logout", "settings", "batch", "dl", "adl", "cancel", "stats", "broadcast", "id", "commands", "referral", "myplan", "premium"]))
 async def single_post_saver(client: Client, message: Message):
     await auto_clean_chat(client, message)
     user_id = message.from_user.id
@@ -50,86 +50,24 @@ async def single_post_saver(client: Client, message: Message):
             await process_and_send_message(client, user_id, source_msg, message.chat.id, status)
             await status.edit_text("✅ **Task Complete!**")
         else:
-            # Range Link
-            import time
-            start_time = time.time()
-            success_count = 0
-            failed_count = 0
-            skipped_count = 0
-
+            # Range Link (e.g. 135 to 137)
             total_posts = (end_id - start_id) + 1
-            base_link = f"https://t.me/c/{str(chat_id)[4:]}" if str(chat_id).startswith("-100") else f"https://t.me/{chat_id}"
-
-            init_text = (
-                f"📦 **Batch Initialized**\n\n"
-                f"**Range:** {start_id} → {end_id}\n"
-                f"**Link:** {link}\n\n"
-                f"🔄 **Processing started...**\n"
-                f"🛑 Use /cancel to stop"
-            )
-            await status.edit_text(init_text)
-            try:
-                await status.pin(both_sides=True)
-            except Exception:
-                pass
-
+            await status.edit_text(f"🚀 **Starting Range Extraction ({total_posts} posts)...**")
             for current_id in range(start_id, end_id + 1):
-                sub_status = None
                 try:
                     source_msg = await fetch_client.get_messages(chat_id, current_id)
-                    if not source_msg or source_msg.empty or source_msg.service:
-                        skipped_count += 1
-                        continue
-                    sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
-                    await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status)
-                    success_count += 1
-                except Exception:
-                    failed_count += 1
-                finally:
-                    if sub_status:
-                        try:
-                            await sub_status.delete()
-                        except Exception:
-                            pass
+                    if source_msg and not source_msg.empty:
+                        sub_status = await message.reply_text(f"🔄 **Processing Post {current_id}...**")
+                        await process_and_send_message(client, user_id, source_msg, message.chat.id, sub_status)
+                        await sub_status.delete()
+                except Exception as e:
+                    print(f"Skipping post {current_id}: {e}")
 
-            elapsed = int(time.time() - start_time)
-            
-            text = (
-                "✅ <b>𝐁𝐚𝐭𝐜𝐡 𝐅𝐢𝐧𝐢𝐬𝐡𝐞𝐝</b>\n\n"
-                "<blockquote>"
-                f"<b>Original Link:</b> <code>{link}</code>\n"
-                f"<b>Range:</b> {start_id} ➔ {end_id}"
-                "</blockquote>\n\n"
-                "📊 <b>𝐒𝐭𝐚𝐭𝐢𝐬𝐭𝐢𝐜𝐬</b>\n\n"
-                "<blockquote>"
-                f"<b>Success:</b> {success_count}\n"
-                f"<b>Skipped:</b> {skipped_count} <i>(deleted/service msgs)</i>\n"
-                f"<b>Failed:</b> {failed_count}"
-                "</blockquote>\n\n"
-                f"⏱ <b>𝐓𝐢𝐦𝐞 𝐓𝐚𝐤𝐞𝐧:</b> {elapsed}s"
-            )
-            try:
-                import urllib.request
-                from config import BOT_TOKEN
-                payload = {
-                    "chat_id": status.chat.id,
-                    "message_id": status.id,
-                    "text": text,
-                    "parse_mode": "HTML",
-                    "disable_web_page_preview": True
-                }
-                url = f"https://api.telegram.org/bot{BOT_TOKEN}/editMessageText"
-                def _do_api():
-                    req = urllib.request.Request(url, data=json.dumps(payload).encode("utf-8"), headers={"Content-Type": "application/json"})
-                    with urllib.request.urlopen(req, timeout=10) as resp:
-                        return json.loads(resp.read().decode("utf-8"))
-                import json
-                await asyncio.to_thread(_do_api)
-            except Exception:
-                await status.edit_text(text, parse_mode=enums.ParseMode.HTML, disable_web_page_preview=True)
+            await status.edit_text("✅ **Batch Completed!**")
 
     except Exception as e:
         await status.edit_text(f"❌ **Error:** `{e}`")
     finally:
         if user_client:
             await user_client.stop()
+
