@@ -196,6 +196,27 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
     if user_thumb and not os.path.exists(user_thumb):
         user_thumb = None
 
+    # Resolve destination peer for bot before any upload attempt
+    try:
+        await bot.resolve_peer(dest_chat)
+    except Exception:
+        # Bot might not know this chat yet — try getting dialogs
+        try:
+            async for _ in bot.get_dialogs(limit=100):
+                pass
+            await bot.resolve_peer(dest_chat)
+        except Exception as e:
+            print(f"Bot could not resolve dest {dest_chat}: {e}")
+
+    # Also resolve for user_client if available
+    if local_user_client:
+        try:
+            await local_user_client.resolve_peer(dest_chat)
+        except Exception:
+            pass
+
+    errors = []  # Track all errors for debugging
+
     # ══════════════════════════════════════════════════════════════
     # MEDIA MESSAGES: Download via source_msg, Upload via bot
     # ══════════════════════════════════════════════════════════════
@@ -209,6 +230,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                 progress=tracker.progress_callback
             )
         except Exception as e:
+            errors.append(f"Download: {e}")
             print(f"Download failed: {e}")
 
         if file_path and os.path.exists(file_path):
@@ -241,7 +263,7 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
 
                     result = await asyncio.to_thread(_bot_api_upload, api_method, fields, file_field, file_path)
                     if not result.get("ok"):
-                        raise Exception(f"Bot API upload failed: {result}")
+                        raise Exception(f"Bot API upload response: {result}")
                 else:
                     # ── No topic: Upload via bot using Pyrogram (matches Kisan logic) ──
                     upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
@@ -268,13 +290,27 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
                     else:
                         await bot.send_document(dest_chat, document=file_path, **kwargs)
             except Exception as e:
-                print(f"Upload failed: {e}")
-                # Fallback: try copy_message via bot (works for public sources)
-                try:
-                    await bot.copy_message(dest_chat, source_msg.chat.id, source_msg.id)
-                except Exception as e2:
-                    print(f"Fallback copy also failed: {e2}")
-                    raise Exception(f"Upload failed: {e}")
+                errors.append(f"Upload(bot): {e}")
+                print(f"Upload via bot failed: {e}")
+                # Try upload via user_client instead
+                if local_user_client:
+                    try:
+                        upload_tracker = ProgressTracker(status_msg, action_text="📤 Uploading Media")
+                        up_kwargs = {"caption": final_caption, "progress": upload_tracker.progress_callback}
+                        if source_msg.photo:
+                            await local_user_client.send_photo(dest_chat, photo=file_path, **up_kwargs)
+                        elif source_msg.video:
+                            await local_user_client.send_video(dest_chat, video=file_path, **up_kwargs)
+                        elif source_msg.audio:
+                            await local_user_client.send_audio(dest_chat, audio=file_path, **up_kwargs)
+                        else:
+                            await local_user_client.send_document(dest_chat, document=file_path, **up_kwargs)
+                    except Exception as e2:
+                        errors.append(f"Upload(user): {e2}")
+                        print(f"Upload via user_client also failed: {e2}")
+                        raise Exception(f"Upload failed: bot={e}, user={e2}")
+                else:
+                    raise
             finally:
                 if file_path and os.path.exists(file_path):
                     os.remove(file_path)
@@ -284,18 +320,18 @@ async def process_and_send_message(bot: Client, user_id: int, source_msg: Messag
         try:
             await bot.copy_message(dest_chat, source_msg.chat.id, source_msg.id)
             return
-        except Exception:
-            pass
+        except Exception as e:
+            errors.append(f"copy(bot): {e}")
 
         # Try user_client copy_message
         if local_user_client:
             try:
                 await local_user_client.copy_message(dest_chat, source_msg.chat.id, source_msg.id)
                 return
-            except Exception:
-                pass
+            except Exception as e:
+                errors.append(f"copy(user): {e}")
 
-        raise Exception(f"Media download+upload failed for dest={dest_chat}")
+        raise Exception(f"Media failed for dest={dest_chat}. Errors: {'; '.join(errors)}")
 
     # ══════════════════════════════════════════════════════════════
     # NON-MEDIA: Location, Contact, Sticker (by file_id), etc.
