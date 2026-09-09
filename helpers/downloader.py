@@ -98,56 +98,35 @@ def parse_tg_link(link: str):
     """
     Parses Telegram message link.
     Handles: single, range, and topic/forum links.
-    Topic format: t.me/c/{channel_id}/{topic_id}/{msg_id}
+    Uses (?:\d+/)? to optionally skip topic ID in forum links.
     """
     link = link.strip()
 
-    # ── Private topic link: t.me/c/CHANNEL/TOPIC/MSG or t.me/c/CHANNEL/TOPIC/START-END ──
-    match_priv_topic_range = re.search(r"t\.me/c/(\d+)/(\d+)/(\d+)-(\d+)", link)
-    if match_priv_topic_range:
-        chat_id = int(f"-100{match_priv_topic_range.group(1)}")
-        start_id = int(match_priv_topic_range.group(3))
-        end_id = int(match_priv_topic_range.group(4))
-        return chat_id, start_id, end_id, True
-
-    match_priv_topic_single = re.search(r"t\.me/c/(\d+)/(\d+)/(\d+)$", link)
-    if match_priv_topic_single:
-        chat_id = int(f"-100{match_priv_topic_single.group(1)}")
-        msg_id = int(match_priv_topic_single.group(3))  # 3rd group = actual msg ID
-        return chat_id, msg_id, msg_id, True
-
-    # ── Private range: t.me/c/CHANNEL/START-END ──
-    match_priv_range = re.search(r"t\.me/c/(\d+)/(\d+)-(\d+)", link)
+    # ── Private range: t.me/c/CHANNEL/[TOPIC/]START-END ──
+    match_priv_range = re.search(r"t\.me/c/(\d+)/(?:\d+/)?(\d+)-(\d+)", link)
     if match_priv_range:
         chat_id = int(f"-100{match_priv_range.group(1)}")
         start_id = int(match_priv_range.group(2))
         end_id = int(match_priv_range.group(3))
         return chat_id, start_id, end_id, True
 
-    # ── Private single: t.me/c/CHANNEL/MSG ──
-    match_priv_single = re.search(r"t\.me/c/(\d+)/(\d+)", link)
+    # ── Private single: t.me/c/CHANNEL/[TOPIC/]MSG ──
+    match_priv_single = re.search(r"t\.me/c/(\d+)/(?:\d+/)?(\d+)", link)
     if match_priv_single:
         chat_id = int(f"-100{match_priv_single.group(1)}")
         msg_id = int(match_priv_single.group(2))
         return chat_id, msg_id, msg_id, True
 
-    # ── Public topic link: t.me/USERNAME/TOPIC/MSG ──
-    match_pub_topic_single = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)/(\d+)$", link)
-    if match_pub_topic_single:
-        chat_id = match_pub_topic_single.group(1)
-        msg_id = int(match_pub_topic_single.group(3))  # 3rd group = actual msg ID
-        return chat_id, msg_id, msg_id, False
-
-    # ── Public range: t.me/USERNAME/START-END ──
-    match_pub_range = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)-(\d+)", link)
+    # ── Public range: t.me/USERNAME/[TOPIC/]START-END ──
+    match_pub_range = re.search(r"t\.me/([a-zA-Z0-9_]+)/(?:\d+/)?(\d+)-(\d+)", link)
     if match_pub_range:
         chat_id = match_pub_range.group(1)
         start_id = int(match_pub_range.group(2))
         end_id = int(match_pub_range.group(3))
         return chat_id, start_id, end_id, False
 
-    # ── Public single: t.me/USERNAME/MSG ──
-    match_pub_single = re.search(r"t\.me/([a-zA-Z0-9_]+)/(\d+)", link)
+    # ── Public single: t.me/USERNAME/[TOPIC/]MSG ──
+    match_pub_single = re.search(r"t\.me/([a-zA-Z0-9_]+)/(?:\d+/)?(\d+)", link)
     if match_pub_single:
         chat_id = match_pub_single.group(1)
         msg_id = int(match_pub_single.group(2))
@@ -223,50 +202,59 @@ async def stop_user_client(user_id: int):
 
 async def fetch_message_with_retry(client: Client, chat_id, msg_id, retries=3, timeout=30):
     """
-    Fetch a message with retry + timeout. Resolves peer first.
+    Fetch a message from private channel with retry.
+    Matches original repo logic: try -100 format, then - format, then refresh dialogs.
     """
-    last_err = None
-
-    # Resolve peer before fetching — critical for private channels
+    # Populate dialogs first (like original)
     try:
-        await force_resolve_peer(client, chat_id)
-    except Exception as e:
-        print(f"Peer resolve warning for {chat_id}: {e}")
+        async for _ in client.get_dialogs(limit=50):
+            pass
+    except Exception:
+        pass
 
-    for attempt in range(retries):
+    # Build chat_id variants to try (like original get_msg)
+    str_id = str(chat_id)
+    ids_to_try = []
+
+    if str_id.startswith('-100'):
+        ids_to_try.append(int(str_id))           # -100xxx format
+        base = str_id[4:]                          # remove -100
+        ids_to_try.append(int(f"-{base}"))         # -xxx format
+    elif str_id.startswith('-'):
+        ids_to_try.append(int(str_id))             # -xxx format
+        base = str_id[1:]                           # remove -
+        ids_to_try.append(int(f"-100{base}"))       # -100xxx format
+    else:
+        ids_to_try.append(chat_id)                  # as-is
+        if str_id.isdigit():
+            ids_to_try.append(int(f"-100{str_id}"))
+            ids_to_try.append(int(f"-{str_id}"))
+
+    # Try each format
+    for cid in ids_to_try:
         try:
-            msg = await asyncio.wait_for(
-                client.get_messages(chat_id, msg_id),
+            result = await asyncio.wait_for(
+                client.get_messages(cid, msg_id),
                 timeout=timeout
             )
-            return msg
-        except asyncio.TimeoutError:
-            last_err = "Connection timed out while fetching message"
-            print(f"[Retry {attempt+1}/{retries}] Timeout fetching msg {msg_id} from {chat_id}")
-            await asyncio.sleep(2)
+            if result and not getattr(result, "empty", False):
+                return result
         except Exception as e:
-            last_err = str(e)
-            if "peer" in str(e).lower():
-                # Peer not resolved — try harder
-                print(f"[Retry {attempt+1}/{retries}] Peer error for {chat_id}, resolving...")
-                try:
-                    await force_resolve_peer(client, chat_id)
-                except Exception:
-                    pass
-                await asyncio.sleep(2)
-            elif "closed" in str(e).lower() or "disconnect" in str(e).lower():
-                print(f"[Retry {attempt+1}/{retries}] Client disconnected, reconnecting...")
-                try:
-                    if not client.is_connected:
-                        await client.start()
-                except Exception:
-                    pass
-                await asyncio.sleep(2)
-            else:
-                print(f"[Retry {attempt+1}/{retries}] Error fetching msg {msg_id}: {e}")
-                await asyncio.sleep(1)
-    
-    print(f"All {retries} retries failed for msg {msg_id}: {last_err}")
+            print(f"Fetch attempt with {cid} failed: {e}")
+
+    # Final fallback — refresh dialogs with higher limit and retry original
+    try:
+        async for _ in client.get_dialogs(limit=200):
+            pass
+        result = await asyncio.wait_for(
+            client.get_messages(chat_id, msg_id),
+            timeout=timeout
+        )
+        if result and not getattr(result, "empty", False):
+            return result
+    except Exception as e:
+        print(f"Final fallback fetch failed: {e}")
+
     return None
 
 
